@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+*.env
+*.env.local
+venv/
+.venv/
+.pytest_cache/
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+data/
+clinifusion_data/
+
+# Firebase & Secrets
+*firebase-service-account.json
+frontend/.env.local
+.env.local
+
+# Model weights (too large for GitHub — >100MB)
+*.pth
+*.pt
+*.onnx
+*.h5
+best_swin_chestxray14/
+
+# Node
+node_modules/
+frontend/node_modules/
+dist/
+frontend/dist/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Scratch / temp
+scratch/

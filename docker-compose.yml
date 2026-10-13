@@ -1,0 +1,51 @@
+services:
+  clinifusionx:
+    build: .
+    container_name: clinifusionx
+    ports:
+      - "8000:8000"
+    # Load API key and secrets from the .env file in the project root.
+    env_file:
+      - .env
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      # Restrict CORS to the deployed frontend origin in production
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:3000,http://localhost:8000}
+      # Set to "false" to hide /docs and /redoc in production
+      - ENABLE_DOCS=${ENABLE_DOCS:-false}
+      # SQLite DB stored in the persistent volume so data survives restarts
+      - SQLALCHEMY_DATABASE_URL=sqlite:////app/data/clinifusion.db
+    restart: unless-stopped
+
+    # ── Persistent SQLite data volume ────────────────────────────────────────
+    # The database file is stored in a named volume so patient records,
+    # analysis history and users are NOT wiped when the container restarts.
+    volumes:
+      - clinifusion_data:/app/data
+      - ./backend/app.py:/app/app.py
+      - ./backend/explainability.py:/app/explainability.py
+      - ./backend/inference.py:/app/inference.py
+      - ./frontend/dist:/app/frontend_dist
+
+    # ── Health check ─────────────────────────────────────────────────────────
+    # Docker will mark the container unhealthy if /api/v1/health returns non-2xx.
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s   # give models time to load before first check
+
+    # ── GPU support (requires nvidia-container-toolkit) ──────────────────────
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+# Named volume — managed by Docker, persists across `docker compose up/down`
+volumes:
+  clinifusion_data:

@@ -1,0 +1,160 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 210 20% 98%;
+    --foreground: 222.2 84% 4.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+    --primary: 204 86% 31%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 221.2 83.2% 53.3%;
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 204 86% 31%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 212.7 26.8% 83.9%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    background-color: #f0f4f8; /* Soft blue from spec */
+  }
+  .dark body {
+    background-color: #0b1121;
+    color: #f8fafc;
+  }
+
+  /* Custom focus-visible outline for accessibility */
+  *:focus-visible {
+    @apply outline-none ring-2 ring-blue-500 ring-offset-2 ring-offset-background;
+  }
+}
+
+/* Custom UI Kit styles */
+.card-surface {
+  @apply bg-white dark:bg-slate-900/90 dark:border-slate-800/80 rounded-3xl shadow-[0_4px_24px_rgba(0,0,0,0.02)] border border-slate-100 p-6;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Compact density mode */
+.density-compact .card-surface {
+  padding: 1.25rem !important;
+}
+.density-compact .space-y-4 > * + * {
+  margin-top: 0.5rem !important;
+}
+.density-compact .mb-8 {
+  margin-bottom: 1.25rem !important;
+}
+
+
+/* Hospital Print Styles */
+@media print {
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  aside, header, .print\:hidden {
+    display: none !important;
+  }
+
+  @page {
+    margin: 1cm 1.2cm;
+    size: A4;
+  }
+
+  body, html, #root, main, .flex-1 {
+    overflow: visible !important;
+    height: auto !important;
+    max-height: none !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  main { padding: 0 !important; margin: 0 !important; }
+
+  h1, h2, h3, h4 { break-after: avoid; }
+
+  #root > div, #root > div > div {
+    position: static !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  /* Compress spacing for 3-page fit */
+  body { font-size: 11px !important; }
+  p, li { line-height: 1.5 !important; font-size: 11px !important; }
+  h1 { font-size: 1.25rem !important; }
+  h2 { font-size: 1.05rem !important; }
+  h3, h4 { font-size: 0.9rem !important; }
+
+  /* Tighten margins and paddings */
+  .mb-10, .mb-12 { margin-bottom: 0.6rem !important; }
+  .mb-8 { margin-bottom: 0.5rem !important; }
+  .mb-6 { margin-bottom: 0.4rem !important; }
+
+  /* Shrink X-ray image */
+  .max-w-2xl { max-width: 240px !important; margin-left: auto !important; margin-right: auto !important; }
+  img {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    max-width: 100% !important;
+    max-height: 240px !important;
+    object-fit: contain !important;
+  }
+
+  /* Cards */
+  .rounded-3xl, .rounded-2xl, .card-surface {
+    border-radius: 6px !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* Hide right sidebar in print */
+  .lg\:w-80 { display: none !important; }
+
+  .print\:block { display: block !important; }
+  .print\:w-full { width: 100% !important; }
+}

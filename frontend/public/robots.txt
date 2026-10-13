@@ -1,0 +1,4 @@
+# This is a protected clinical application.
+# Disallow all crawlers from indexing any content.
+User-agent: *
+Disallow: /
