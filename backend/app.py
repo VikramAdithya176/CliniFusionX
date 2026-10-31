@@ -716,6 +716,7 @@ async def explain_finding(
     class_idx: int = Form(...),
     image: UploadFile = File(...),
     cam_method: str = Form("gradcam"),
+    force_refresh: bool = Form(False),
     user: dict = Depends(_require_auth),
     _models: None = Depends(_require_models),
 ):
@@ -727,17 +728,18 @@ async def explain_finding(
         raise HTTPException(status_code=413, detail=f"Image too large. Max {MAX_IMAGE_SIZE_MB} MB.")
 
     cache_key = f"{hashlib.sha256(img_bytes).hexdigest()}_{class_idx}_{cam_method}"
-    cached_res = _get_cached_heatmap(cache_key)
-    if cached_res:
-        logger.info(f"[{user['user_id']}] Heatmap CACHE HIT for class_idx={class_idx} ({cam_method})")
-        return {"heatmap_base64": cached_res, "cached": True}
+    if not force_refresh:
+        cached_res = _get_cached_heatmap(cache_key)
+        if cached_res:
+            logger.info(f"[{user['user_id']}] Heatmap CACHE HIT for class_idx={class_idx} ({cam_method})")
+            return {"heatmap_base64": cached_res, "cached": True}
 
     try:
         pil_img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
     except Exception:
         raise HTTPException(status_code=400, detail="Could not decode image.")
 
-    logger.info(f"[{user['user_id']}] Generating heatmap for class_idx={class_idx} ({cam_method})...")
+    logger.info(f"[{user['user_id']}] Generating heatmap for class_idx={class_idx} ({cam_method}, force_refresh={force_refresh})...")
     input_tensor = engine.preprocess_image(pil_img).to(engine.device)
     
     # Run CPU/GPU compute in threadpool so FastAPI event loop is never blocked
@@ -762,15 +764,23 @@ async def explain_finding_legacy(
     class_idx: int = Form(...),
     image: UploadFile = File(...),
     cam_method: str = Form("gradcam"),
+    force_refresh: bool = Form(False),
 ):
     return await explain_finding(
         request=request,
         class_idx=class_idx,
         image=image,
         cam_method=cam_method,
+        force_refresh=force_refresh,
         user={"user_id": "legacy"},
         _models=None,
     )
+
+
+@app.post("/api/v1/explain/clear-cache", include_in_schema=False)
+async def clear_heatmap_cache():
+    _heatmap_cache.clear()
+    return {"status": "cleared"}
 
 # ── History ───────────────────────────────────────────────────────────────────
 

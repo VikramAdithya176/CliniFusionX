@@ -482,7 +482,7 @@ export default function Explainability() {
                     Generating ScoreCAM for {selectedLabel ? selectedLabel.replace('_', ' ') : 'selected finding'}...
                   </p>
                   <p className="text-amber-200/90 text-xs mt-1.5 font-medium max-w-sm">
-                    ⚡ Fast multi-channel processing in progress (~7-10s).
+                    ⚡ High-fidelity ScoreCAM computing across 768 channels (~45–60s)...
                   </p>
                   <p className="text-white/50 text-[11px] mt-1 max-w-xs">
                     You can freely explore other sections in the application — this process continues running in the background!

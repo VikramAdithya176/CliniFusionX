@@ -138,6 +138,20 @@ export function ExplainabilityProvider({ children }: { children: React.ReactNode
       return;
     }
 
+    // If forceRefresh, clear existing cached entry from state and storage
+    if (forceRefresh) {
+      setHeatmaps((prev) => {
+        const next = { ...prev };
+        delete next[classIdx];
+        return next;
+      });
+      try {
+        sessionStorage.removeItem(`cfx_hm_${imgKey}_${classIdx}`);
+      } catch (e) {
+        // ignore
+      }
+    }
+
     // Mark as in-flight
     setActiveClassIdx(classIdx);
     setActiveLabel(label);
@@ -157,6 +171,9 @@ export function ExplainabilityProvider({ children }: { children: React.ReactNode
       formData.append('image', blob, 'xray.jpg');
       formData.append('class_idx', String(classIdx));
       formData.append('cam_method', 'scorecam');
+      if (forceRefresh) {
+        formData.append('force_refresh', 'true');
+      }
 
       const apiBase = (localStorage.getItem('apiBaseUrl') || 'http://localhost:8000').replace(/\/+$/, '');
       const response = await fetch(`${apiBase}/api/explain`, {
@@ -236,6 +253,14 @@ export function ExplainabilityProvider({ children }: { children: React.ReactNode
     setActiveClassIdx(null);
     setActiveLabel('');
     setError(null);
+
+    // Also clear backend in-memory heatmap cache
+    try {
+      const apiBase = (localStorage.getItem('apiBaseUrl') || 'http://localhost:8000').replace(/\/+$/, '');
+      fetch(`${apiBase}/api/v1/explain/clear-cache`, { method: 'POST' }).catch(() => {});
+    } catch (e) {
+      // ignore
+    }
   }, []);
 
   const isGenerating = inFlight.length > 0;
