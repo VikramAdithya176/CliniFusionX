@@ -29,6 +29,7 @@ class AnalysisRecord(Base):
     id = Column(String, primary_key=True, index=True)
     user_id = Column(String, index=True)
     patient_id = Column(String, ForeignKey("patients.mrn"), nullable=True, index=True)
+    patient_name = Column(String, nullable=True)
     
     timestamp = Column(Integer)
     date = Column(String)

@@ -222,6 +222,7 @@ export async function loginWithGoogleFirebase(): Promise<AuthUser> {
   try {
     result = await signInWithPopup(auth, googleProvider);
   } catch (err: any) {
+    console.error('Firebase Google Sign-In Error:', err);
     // User closed the popup or browser blocked it
     if (err?.code === 'auth/popup-closed-by-user' || err?.code === 'auth/cancelled-popup-request') {
       throw new Error('Sign-in was cancelled. Please try again.');
@@ -229,11 +230,22 @@ export async function loginWithGoogleFirebase(): Promise<AuthUser> {
     if (err?.code === 'auth/popup-blocked') {
       throw new Error('Popup was blocked by the browser. Please allow popups for this site and try again.');
     }
+    if (err?.code === 'auth/unauthorized-domain') {
+      throw new Error('This domain is not authorized in Firebase. Please use http://localhost:5173 or add this domain in Firebase Console.');
+    }
+    if (err?.code === 'auth/network-request-failed') {
+      throw new Error('Network error: Unable to reach Google/Firebase servers. Please check your internet connection.');
+    }
+    if (err?.code === 'auth/internal-error') {
+      throw new Error(
+        'Google sign-in encountered a Firebase internal error. This usually occurs if third-party cookies/cross-site tracking are blocked in your browser, if using an IP (e.g. 127.0.0.1 instead of localhost), or due to a temporary network drop. You can also sign in using the demo account (admin / admin123) or Continue as Guest.'
+      );
+    }
     throw new Error(err?.message || 'Google sign-in failed. Please try again.');
   }
 
   const firebaseUser = result.user;
-  const idToken = await firebaseUser.getIdToken();
+  const idToken = await firebaseUser.getIdToken(true);
 
   const apiBase = getApiBase();
 
@@ -271,4 +283,80 @@ export async function loginWithGoogleFirebase(): Promise<AuthUser> {
 
   _persistSession(data.token, user);
   return user;
+}
+
+/**
+ * Update authenticated user's profile information.
+ */
+export async function updateUserProfile(data: {
+  name?: string;
+  role?: string;
+  department?: string;
+}): Promise<AuthUser> {
+  const apiBase = getApiBase();
+  const token = getToken();
+
+  const response = await fetch(`${apiBase}/api/v1/auth/profile`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(data),
+  });
+
+  if (!response.ok) {
+    let detail = 'Failed to update profile.';
+    try {
+      const err = await response.json();
+      detail = err?.detail || detail;
+    } catch { /* ignore */ }
+    throw new Error(detail);
+  }
+
+  const resData = await response.json();
+  const existing = getAuthUser();
+  const updated: AuthUser = {
+    id: resData.user?.id || existing?.id || 'guest',
+    name: resData.user?.name || existing?.name || '',
+    role: resData.user?.role || existing?.role || '',
+    department: resData.user?.department || existing?.department || '',
+    email: existing?.email,
+    avatarUrl: existing?.avatarUrl,
+  };
+
+  localStorage.setItem(AUTH_USER_KEY, JSON.stringify(updated));
+  return updated;
+}
+
+/**
+ * Change authenticated user's password.
+ */
+export async function changePassword(currentPassword: string, newPassword: string): Promise<string> {
+  const apiBase = getApiBase();
+  const token = getToken();
+
+  const response = await fetch(`${apiBase}/api/v1/auth/change-password`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({
+      current_password: currentPassword,
+      new_password: newPassword,
+    }),
+  });
+
+  if (!response.ok) {
+    let detail = 'Failed to change password.';
+    try {
+      const err = await response.json();
+      detail = err?.detail || detail;
+    } catch { /* ignore */ }
+    throw new Error(detail);
+  }
+
+  const resData = await response.json();
+  return resData?.message || 'Password changed successfully.';
 }

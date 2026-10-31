@@ -136,6 +136,7 @@ def generate_report_pdf(
     clinician_role: str,
     clinician_dept: str,
     image_base64: str | None = None,
+    patient_name: str | None = None,
 ) -> bytes:
     """
     Generate a branded clinical PDF and return the raw bytes.
@@ -149,6 +150,7 @@ def generate_report_pdf(
     clinician_role: Clinician's role.
     clinician_dept: Clinician's department.
     image_base64  : Base64-encoded chest X-ray thumbnail (optional).
+    patient_name  : Patient's full name (optional).
 
     Returns
     -------
@@ -201,8 +203,9 @@ def generate_report_pdf(
     story.append(header_table)
 
     # ── METADATA ROW ───────────────────────────────────────────────────────────
-    meta_keys = ["Record ID", "Report Date", "Modality", "AI Model", "Ordering Physician"]
+    meta_keys = ["Patient Name", "Record ID / MRN", "Report Date", "Modality", "AI Model", "Ordering Physician"]
     meta_vals = [
+        patient_name if patient_name else "Not specified",
         record_id,
         report_date,
         "Chest X-ray, PA View",

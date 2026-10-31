@@ -10,6 +10,8 @@ const oneDay = 24 * 3600 * 1000;
 export const DEFAULT_RECORDS: AnalysisRecord[] = [
   {
     id: 'CXR-2481',
+    patient_id: 'MRN-78910',
+    patientName: 'Arthur Pendelton',
     timestamp: now - oneDay * 0.1, // Today
     date: '14 Sept 2026, 09:15',
     status: 'Completed',
@@ -48,6 +50,8 @@ export const DEFAULT_RECORDS: AnalysisRecord[] = [
   },
   {
     id: 'CXR-2480',
+    patient_id: 'MRN-45129',
+    patientName: 'Eleanor Vance',
     timestamp: now - oneDay * 1.5, // 1-2 days ago
     date: '13 Sept 2026, 17:45',
     status: 'Completed',
@@ -86,6 +90,8 @@ export const DEFAULT_RECORDS: AnalysisRecord[] = [
   },
   {
     id: 'CXR-2479',
+    patient_id: 'MRN-90234',
+    patientName: 'Margaret Holloway',
     timestamp: now - oneDay * 3.2, // 3 days ago
     date: '11 Sept 2026, 11:15',
     status: 'Completed',

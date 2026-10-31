@@ -41,8 +41,38 @@ export default function NewAnalysis() {
   // Directory Patients for quick matching/autocomplete
   const [existingPatients, setExistingPatients] = useState<Patient[]>([]);
 
+  // Draft & Toast State
+  const [draftToast, setDraftToast] = useState<string | null>(null);
+
   useEffect(() => {
     getPatients().then(setExistingPatients).catch(() => {});
+
+    // Check if there is a saved draft in localStorage (only if not navigating with explicit patient state)
+    if (!location.state?.patient) {
+      try {
+        const savedDraftRaw = localStorage.getItem('clinifusion_new_analysis_draft');
+        if (savedDraftRaw) {
+          const draft = JSON.parse(savedDraftRaw);
+          if (draft.patientName) setPatientName(draft.patientName);
+          if (draft.patientMrn) setPatientMrn(draft.patientMrn);
+          if (draft.age) setAge(draft.age);
+          if (draft.sex) setSex(draft.sex);
+          if (Array.isArray(draft.symptoms)) setSymptoms(draft.symptoms);
+          if (draft.otherSymptom) setOtherSymptom(draft.otherSymptom);
+          if (draft.temp) setTemp(draft.temp);
+          if (draft.hr) setHr(draft.hr);
+          if (draft.spo2) setSpo2(draft.spo2);
+          if (draft.wbc) setWbc(draft.wbc);
+          if (draft.crp) setCrp(draft.crp);
+          if (draft.ddimer) setDdimer(draft.ddimer);
+          if (draft.imagePreview) setImagePreview(draft.imagePreview);
+          setDraftToast('Restored saved draft');
+          setTimeout(() => setDraftToast(null), 3000);
+        }
+      } catch {
+        // ignore parse error
+      }
+    }
 
     // Prefill if navigated from Patient Directory "New Scan" button
     if (location.state?.patient) {
@@ -86,6 +116,7 @@ export default function NewAnalysis() {
 
   // UI State
   const [isProcessing, setIsProcessing] = useState(false);
+  const [processingStage, setProcessingStage] = useState<string>("Initializing inference...");
   const [error, setError] = useState("");
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -138,7 +169,18 @@ export default function NewAnalysis() {
     }
 
     setIsProcessing(true);
+    setProcessingStage("Preprocessing radiograph & normalizing tensor…");
     setError("");
+
+    // Interval to provide clinical stage feedback during inference
+    const stageTimer = setInterval(() => {
+      setProcessingStage(prev => {
+        if (prev.includes("Preprocessing")) return "Swin Transformer: extracting deep visual features…";
+        if (prev.includes("extracting")) return "Cross-checking symptoms with Clinical Correlation Matrix…";
+        if (prev.includes("Cross-checking")) return "Synthesizing multimodal findings via clinical LLM…";
+        return "Finalizing structured radiological report…";
+      });
+    }, 2800);
 
     try {
       // 1. If a patient name is entered, register them into the Patient Directory
@@ -190,6 +232,8 @@ export default function NewAnalysis() {
         retries: 1,
       });
 
+      clearInterval(stageTimer);
+
       if (!response.ok) {
         let detail = `Analysis failed (HTTP ${response.status}).`;
         try { const body = await response.json(); detail = body?.detail || detail; } catch { /* ignore */ }
@@ -231,6 +275,13 @@ export default function NewAnalysis() {
         console.error('Failed to save to history:', saveErr);
       }
 
+      // Clear draft once analysis completes successfully
+      try {
+        localStorage.removeItem('clinifusion_new_analysis_draft');
+      } catch {
+        // ignore
+      }
+
       // Navigate to results page and pass the complete active patient record
       navigate('/results', {
         state: {
@@ -250,8 +301,43 @@ export default function NewAnalysis() {
     }
   };
 
+  const handleSaveDraft = () => {
+    const draft = {
+      patientName,
+      patientMrn,
+      age,
+      sex,
+      symptoms,
+      otherSymptom,
+      temp,
+      hr,
+      spo2,
+      wbc,
+      crp,
+      ddimer,
+      imagePreview: imagePreview || null,
+      savedAt: Date.now()
+    };
+    try {
+      localStorage.setItem('clinifusion_new_analysis_draft', JSON.stringify(draft));
+      setDraftToast('Draft saved successfully');
+      setTimeout(() => setDraftToast(null), 3000);
+    } catch (err) {
+      console.warn('Could not save draft to localStorage:', err);
+      setDraftToast('Error saving draft');
+      setTimeout(() => setDraftToast(null), 3000);
+    }
+  };
+
   return (
-    <div className="max-w-5xl mx-auto pb-12 animate-in fade-in duration-500">
+    <div className="max-w-5xl mx-auto pb-12 animate-in fade-in duration-500 relative">
+      {/* Draft Notification Toast */}
+      {draftToast && (
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2 bg-[#0b5c92] text-white px-4 py-3 rounded-2xl shadow-xl border border-blue-400 text-sm font-semibold animate-in fade-in slide-in-from-bottom-2">
+          <CheckCircle size={16} className="text-emerald-300" />
+          <span>{draftToast}</span>
+        </div>
+      )}
       <div className="mb-8">
         <h1 className="text-3xl font-display font-bold text-deep-navy dark:text-slate-100">New Chest X-ray Analysis</h1>
         <p className="text-slate-500 dark:text-slate-400 mt-1">Upload an X-ray and provide clinical context for AI-assisted analysis.</p>
@@ -553,11 +639,26 @@ export default function NewAnalysis() {
 
       <div className="card-surface p-6 flex flex-col sm:flex-row items-center justify-between gap-4 mt-6 shadow-xl border-blue-100 dark:border-slate-800">
         <div>
-          <h3 className="font-bold text-deep-navy dark:text-slate-100">Ready to run inference</h3>
-          <p className="text-xs text-slate-500 dark:text-slate-400">The interface will forward the image and clinical context to your backend.</p>
+          <h3 className="font-bold text-deep-navy dark:text-slate-100 flex items-center gap-2">
+            {isProcessing ? (
+              <>
+                <Loader2 size={16} className="animate-spin text-[#0b5c92] dark:text-blue-400" />
+                <span>Running AI Pipeline</span>
+              </>
+            ) : (
+              <span>Ready to run inference</span>
+            )}
+          </h3>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            {isProcessing ? processingStage : "The interface will forward the image and clinical context to your backend."}
+          </p>
         </div>
         <div className="flex gap-4 w-full sm:w-auto">
-          <button className="flex-1 sm:flex-none px-6 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-sm font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center justify-center gap-2 transition-colors cursor-pointer">
+          <button
+            type="button"
+            onClick={handleSaveDraft}
+            className="flex-1 sm:flex-none px-6 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-sm font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center justify-center gap-2 transition-colors cursor-pointer active:scale-95"
+          >
             <Save size={16} /> Save Draft
           </button>
           <button

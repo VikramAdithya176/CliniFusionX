@@ -193,3 +193,24 @@ export async function registerPatient(input: RegisterPatientInput): Promise<Pati
 
   return newPatient;
 }
+
+export async function deletePatient(mrn: string): Promise<void> {
+  // 1. Remove from local cache
+  const localList = getLocalPatients().filter(p => p.mrn.toUpperCase() !== mrn.toUpperCase());
+  setLocalPatients(localList);
+
+  // 2. Delete from backend database
+  try {
+    const token = getAuthToken();
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    await fetch(`${getApiBase()}/api/v1/patients/${encodeURIComponent(mrn)}`, {
+      method: 'DELETE',
+      headers,
+    });
+  } catch (err) {
+    console.warn('Could not delete patient from backend:', err);
+  }
+}

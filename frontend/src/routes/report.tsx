@@ -6,6 +6,7 @@ import clsx from 'clsx';
 import { getCurrentPatient } from '../services/historyService';
 import { getAuthUser, DEFAULT_CLINICIAN, getAuthToken } from '../services/authService';
 import { useToast } from '../components/Toast';
+import { getLocalPatients } from '../services/patientService';
 
 export default function ClinicalReport() {
   const navigate = useNavigate();
@@ -17,6 +18,7 @@ export default function ClinicalReport() {
   const [pdfLoading, setPdfLoading] = useState(false);
   
   const [activePatient, setActivePatient] = useState<any>(null);
+  const [resolvedPatientName, setResolvedPatientName] = useState<string>('');
   const currentUser = getAuthUser() || DEFAULT_CLINICIAN;
 
   useEffect(() => {
@@ -29,6 +31,28 @@ export default function ClinicalReport() {
   let recordId = location.state?.recordId || activePatient?.id;
   let recordDate = location.state?.date || activePatient?.date;
   let patientName = location.state?.patientName || activePatient?.patientName || '';
+
+  // If patientName is still empty, try to look it up from the patient directory by MRN/patient_id
+  const patientId = location.state?.recordId || activePatient?.patient_id || activePatient?.id || '';
+  useEffect(() => {
+    if (patientName) {
+      setResolvedPatientName(patientName);
+      return;
+    }
+    if (!patientId) return;
+    const patients = getLocalPatients();
+    const match = patients.find(
+      p => p.mrn && p.mrn.toUpperCase() === patientId.toUpperCase()
+    );
+    if (match) {
+      const full = match.last_name
+        ? `${match.first_name} ${match.last_name}`.trim()
+        : match.first_name;
+      setResolvedPatientName(full || '');
+    }
+  }, [patientName, patientId]);
+
+  const displayPatientName = patientName || resolvedPatientName;
   const imagePreview = location.state?.imagePreview || sessionStorage.getItem('recentImagePreview') || activePatient?.imagePreview;
 
   const displayRecordId = recordId || 'CXR-2481';
@@ -65,7 +89,7 @@ export default function ClinicalReport() {
 
 PATIENT & STUDY INFORMATION
 --------------------------------------------------------------------------------
-${patientName ? `Patient Name   : ${patientName}\n` : ''}Record ID      : ${displayRecordId}
+Patient Name   : ${displayPatientName || 'Unknown'}\nRecord ID      : ${displayRecordId}
 Report Date    : ${displayDate}
 Modality       : Chest X-ray (PA view)
 AI Model       : Swin-Tiny · Patch4 · Window7 · 224 (NIH ChestX-ray14)
@@ -140,6 +164,7 @@ Report generated on ${displayDate} | Record ${displayRecordId}
           report_date: displayDate,
           report: reportData,
           image_preview: imagePreview ?? null,
+          patient_name: displayPatientName || undefined,
         }),
       });
       if (!response.ok) {
@@ -298,9 +323,15 @@ Report generated on ${displayDate} | Record ${displayRecordId}
               </div>
               <h2 className="text-3xl sm:text-4xl font-display font-bold mb-8">Chest X-Ray Report</h2>
               
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="bg-white/10 rounded-xl p-4 border border-white/20 backdrop-blur-sm">
-                  <div className="text-[10px] font-bold text-blue-200 uppercase tracking-wider mb-1">Record ID</div>
+                  <div className="text-[10px] font-bold text-blue-200 uppercase tracking-wider mb-1">Patient Name</div>
+                  <div className="font-semibold text-lg truncate" title={displayPatientName || 'Not specified'}>
+                    {displayPatientName || 'Not specified'}
+                  </div>
+                </div>
+                <div className="bg-white/10 rounded-xl p-4 border border-white/20 backdrop-blur-sm">
+                  <div className="text-[10px] font-bold text-blue-200 uppercase tracking-wider mb-1">Record ID / MRN</div>
                   <div className="font-semibold text-lg">{displayRecordId}</div>
                 </div>
                 <div className="bg-white/10 rounded-xl p-4 border border-white/20 backdrop-blur-sm">
@@ -309,7 +340,7 @@ Report generated on ${displayDate} | Record ${displayRecordId}
                 </div>
                 <div className="bg-white/10 rounded-xl p-4 border border-white/20 backdrop-blur-sm">
                   <div className="text-[10px] font-bold text-blue-200 uppercase tracking-wider mb-1">AI Model</div>
-                  <div className="font-semibold text-base truncate">Swin-Tiny · Patch4 · Window7 · 224</div>
+                  <div className="font-semibold text-base truncate">Swin-Tiny (ChestX-ray14)</div>
                 </div>
               </div>
             </div>
@@ -403,12 +434,12 @@ Report generated on ${displayDate} | Record ${displayRecordId}
                 <SectionHeading num={1} title="Patient & Study Information" />
                 <div className="pl-11">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3 text-[15px]">
-                    {patientName && (
-                      <div className="flex gap-2">
-                        <span className="font-semibold text-slate-500 dark:text-slate-400 min-w-[130px]">Patient Name:</span>
-                        <span className="text-slate-800 dark:text-slate-200 font-bold">{patientName}</span>
-                      </div>
-                    )}
+                    <div className="flex gap-2">
+                      <span className="font-semibold text-slate-500 dark:text-slate-400 min-w-[130px]">Patient Name:</span>
+                      <span className="text-slate-800 dark:text-slate-200 font-bold">
+                        {displayPatientName || <span className="text-slate-400 italic font-normal">Unknown</span>}
+                      </span>
+                    </div>
                     <div className="flex gap-2">
                       <span className="font-semibold text-slate-500 dark:text-slate-400 min-w-[130px]">Patient ID / MRN:</span>
                       <span className="text-slate-800 dark:text-slate-200">{displayRecordId}</span>

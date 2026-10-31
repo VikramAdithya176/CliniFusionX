@@ -142,6 +142,13 @@ export async function saveAnalysis(record: Omit<AnalysisRecord, 'id' | 'timestam
     imagePreview: record.imagePreview || SAMPLE_CXR_1,
   };
 
+  // Respect user privacy preference: if pref_storeHistory is disabled, do not persist to storage or database
+  const shouldStore = localStorage.getItem('pref_storeHistory') !== 'false';
+  if (!shouldStore) {
+    setCurrentPatient(newRecord.id);
+    return newRecord;
+  }
+
   // 1. Immediately cache in localStorage for instant client durability
   try {
     const updated = [newRecord, ...current.filter(r => r.id !== newRecord.id)];

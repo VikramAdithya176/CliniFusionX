@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { Activity, ScanLine, Layers, TrendingUp, Box } from 'lucide-react';
+import { Activity, ScanLine, Layers, TrendingUp, Box, User } from 'lucide-react';
 import clsx from 'clsx';
 import { useNavigate } from 'react-router-dom';
 import { 
@@ -98,7 +98,7 @@ export default function Dashboard() {
             {totalCount.toLocaleString()}
           </div>
           <div className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1">
-            <TrendingUp size={12} className="text-emerald-500" /> Recorded in this session
+            <TrendingUp size={12} className="text-emerald-500" /> Total recorded analyses
           </div>
         </div>
 
@@ -207,7 +207,8 @@ export default function Dashboard() {
                         clinicalText: item.clinicalText, 
                         imagePreview: item.imagePreview,
                         recordId: item.id,
-                        date: item.date 
+                        date: item.date,
+                        patientName: item.patientName || (item as any).patient_name || ''
                       } 
                     });
                   }}
@@ -225,13 +226,21 @@ export default function Dashboard() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-1">
-                        <h4 className="font-bold text-deep-navy dark:text-slate-100 truncate">{item.id}</h4>
+                        <div className="min-w-0">
+                          <h4 className="font-bold text-deep-navy dark:text-slate-100 truncate">{item.id}</h4>
+                          {(item.patientName || (item as any).patient_name) && (
+                            <p className="text-xs font-semibold text-[#0b5c92] dark:text-blue-300 truncate flex items-center gap-1 mt-0.5">
+                              <User size={11} className="shrink-0" />
+                              <span className="truncate">{item.patientName || (item as any).patient_name}</span>
+                            </p>
+                          )}
+                        </div>
                         <span className={clsx(
                           "text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded shrink-0",
                           item.status === 'Completed' ? "bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300" : "bg-emerald-100 text-emerald-700"
                         )}>{item.status}</span>
                       </div>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">{item.date}</p>
+                      <p className="text-[11px] text-slate-400 mt-0.5">{item.date}</p>
                     </div>
                   </div>
                   

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { User, Lock, Stethoscope, ArrowRight, ShieldCheck, Eye, EyeOff } from 'lucide-react';
+import { User, Lock, Stethoscope, ArrowRight, ShieldCheck, Eye, EyeOff, Sun, Moon } from 'lucide-react';
 import clsx from 'clsx';
 import { loginUser, registerUser, loginAsGuest, loginWithGoogleFirebase } from '../services/authService';
 import { useToast } from '../components/Toast';
@@ -18,6 +18,21 @@ export default function Login() {
   const navigate = useNavigate();
   const { success, error: showError } = useToast();
   const [isSignUp, setIsSignUp] = useState(false);
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    return localStorage.getItem('app_theme') === 'light' ? 'light' : 'dark';
+  });
+
+  const toggleTheme = () => {
+    const next = theme === 'dark' ? 'light' : 'dark';
+    setTheme(next);
+    localStorage.setItem('app_theme', next);
+    if (next === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+    window.dispatchEvent(new Event('themeChange'));
+  };
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -92,6 +107,16 @@ export default function Login() {
       {/* Ambient glows */}
       <div className="absolute -top-32 -left-32 w-96 h-96 rounded-full bg-blue-200/35 dark:bg-blue-900/12 blur-[100px] pointer-events-none" />
       <div className="absolute -bottom-32 -right-32 w-96 h-96 rounded-full bg-sky-200/35 dark:bg-sky-950/12 blur-[100px] pointer-events-none" />
+
+      {/* Theme Toggle Button */}
+      <button
+        type="button"
+        onClick={toggleTheme}
+        className="absolute top-6 right-6 z-20 p-2.5 rounded-full bg-[#e8edf3] dark:bg-[#0d1424] text-slate-600 dark:text-slate-300 shadow-[4px_4px_8px_#c3ccd8,-4px_-4px_8px_#ffffff] dark:shadow-[4px_4px_8px_#05080f,-4px_-4px_8px_#141f36] border border-white/60 dark:border-slate-800/60 hover:text-[#0b5c92] dark:hover:text-sky-400 transition-colors cursor-pointer"
+        title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} mode`}
+      >
+        {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+      </button>
 
       {/* ── Circular Disc ── */}
       <div className={clsx(

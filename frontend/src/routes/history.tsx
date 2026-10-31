@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { 
   Search, Filter, Trash2, Calendar, FileText, ScanLine, 
-  AlertCircle, Plus, CheckCircle2 
+  AlertCircle, Plus, CheckCircle2, User
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { getHistory, deleteAnalysis, clearHistory, setCurrentPatient, type AnalysisRecord } from '../services/historyService';
@@ -29,7 +29,19 @@ export default function PatientHistory() {
   const [records, setRecords] = useState<AnalysisRecord[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedDisease, setSelectedDisease] = useState('All');
+  const [dateRange, setDateRange] = useState<'all' | 'today' | '7days' | '30days'>('all');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    description: string;
+    onConfirm: () => Promise<void>;
+  }>({
+    isOpen: false,
+    title: '',
+    description: '',
+    onConfirm: async () => {}
+  });
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -42,21 +54,31 @@ export default function PatientHistory() {
     getHistory().then(setRecords);
   }, []);
 
-  const handleDelete = async (id: string, e: React.MouseEvent) => {
+  const handleDelete = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (window.confirm(`Are you sure you want to delete analysis record ${id}?`)) {
-      const updated = await deleteAnalysis(id);
-      setRecords(updated);
-      showToast(`Record ${id} deleted.`);
-    }
+    setConfirmModal({
+      isOpen: true,
+      title: 'Delete Analysis Record',
+      description: `Are you sure you want to permanently delete record ${id}? This action cannot be undone.`,
+      onConfirm: async () => {
+        const updated = await deleteAnalysis(id);
+        setRecords(updated);
+        showToast(`Record ${id} deleted.`);
+      }
+    });
   };
 
-  const handleClearAll = async () => {
-    if (window.confirm('Are you sure you want to clear all analysis history?')) {
-      await clearHistory();
-      setRecords([]);
-      showToast('All history cleared.');
-    }
+  const handleClearAll = () => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'Clear Entire Analysis History',
+      description: 'Are you sure you want to clear all analysis records? All saved inferences and reports will be removed.',
+      onConfirm: async () => {
+        await clearHistory();
+        setRecords([]);
+        showToast('All history cleared.');
+      }
+    });
   };
 
   const handleRestoreDefaults = async () => {
@@ -78,7 +100,8 @@ export default function PatientHistory() {
         clinicalText: item.clinicalText, 
         imagePreview: item.imagePreview,
         recordId: item.id,
-        date: item.date
+        date: item.date,
+        patientName: item.patientName || (item as any).patient_name || ''
       } 
     });
   };
@@ -92,7 +115,8 @@ export default function PatientHistory() {
       state: { 
         reportText: item.report,
         recordId: item.id,
-        date: item.date
+        date: item.date,
+        patientName: item.patientName || (item as any).patient_name || ''
       } 
     });
   };
@@ -158,8 +182,11 @@ export default function PatientHistory() {
   // Filter records with enhanced Fuzzy Search
   const filteredRecords = records.filter((r) => {
     const topDisease = r.topFinding?.disease || (r as any).top_finding?.disease || 'No Finding';
+    const patientName = r.patientName || (r as any).patient_name || '';
     const recordSearchCorpus = [
       r.id,
+      r.patient_id || '',
+      patientName,
       topDisease,
       r.clinicalText || (r as any).clinical_text || '',
       r.status,
@@ -173,7 +200,26 @@ export default function PatientHistory() {
       topDisease === selectedDisease ||
       r.findings?.some(f => f.disease === selectedDisease && (f.probability >= 0.2 || f.detected));
 
-    return matchesSearch && matchesDisease;
+    const matchesDate = (() => {
+      if (dateRange === 'all') return true;
+      const recordTime = r.timestamp 
+        ? (r.timestamp > 1e11 ? r.timestamp : r.timestamp * 1000) 
+        : (r.date ? new Date(r.date).getTime() : 0);
+      if (!recordTime || isNaN(recordTime)) return true;
+      const now = Date.now();
+      if (dateRange === 'today') {
+        return recordTime >= (now - 24 * 60 * 60 * 1000);
+      }
+      if (dateRange === '7days') {
+        return recordTime >= (now - 7 * 24 * 60 * 60 * 1000);
+      }
+      if (dateRange === '30days') {
+        return recordTime >= (now - 30 * 24 * 60 * 60 * 1000);
+      }
+      return true;
+    })();
+
+    return matchesSearch && matchesDisease && matchesDate;
   });
 
   const allDiseases = Array.from(new Set(records.map(r => r.topFinding?.disease || (r as any).top_finding?.disease || 'No Finding'))).filter(Boolean);
@@ -214,30 +260,48 @@ export default function PatientHistory() {
       </div>
 
       {/* Filter and Search Bar */}
-      <div className="card-surface p-4 mb-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+      <div className="card-surface p-4 mb-6 flex flex-col md:flex-row items-center justify-between gap-4">
         <div className="relative flex-1 w-full">
           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
           <input 
             type="text" 
-            placeholder="Search by record ID, disease, or symptoms..." 
+            placeholder="Search by patient name, MRN, record ID, disease, or symptoms..." 
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all text-deep-navy dark:text-slate-100"
           />
         </div>
 
-        <div className="flex items-center gap-2 w-full sm:w-auto">
-          <Filter size={16} className="text-slate-400 shrink-0" />
-          <select
-            value={selectedDisease}
-            onChange={(e) => setSelectedDisease(e.target.value)}
-            className="py-2.5 px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50 text-sm font-semibold text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer w-full sm:w-auto"
-          >
-            <option value="All">All Pathologies ({records.length})</option>
-            {allDiseases.map((d) => (
-              <option key={d} value={d}>{d}</option>
-            ))}
-          </select>
+        <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+          {/* Time range filter */}
+          <div className="flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50 text-xs font-semibold text-slate-700 dark:text-slate-200">
+            <Calendar size={15} className="text-slate-400 shrink-0" />
+            <select
+              value={dateRange}
+              onChange={(e) => setDateRange(e.target.value as any)}
+              className="bg-transparent text-slate-700 dark:text-slate-200 focus:outline-none cursor-pointer text-xs font-semibold"
+            >
+              <option value="all">All Dates</option>
+              <option value="today">Past 24 Hours</option>
+              <option value="7days">Past 7 Days</option>
+              <option value="30days">Past 30 Days</option>
+            </select>
+          </div>
+
+          {/* Disease category filter */}
+          <div className="flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50 text-xs font-semibold text-slate-700 dark:text-slate-200">
+            <Filter size={15} className="text-slate-400 shrink-0" />
+            <select
+              value={selectedDisease}
+              onChange={(e) => setSelectedDisease(e.target.value)}
+              className="bg-transparent text-slate-700 dark:text-slate-200 focus:outline-none cursor-pointer text-xs font-semibold"
+            >
+              <option value="All">All Pathologies ({records.length})</option>
+              {allDiseases.map((d) => (
+                <option key={d} value={d}>{d}</option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
 
@@ -299,6 +363,16 @@ export default function PatientHistory() {
                     <div className="flex-1 min-w-0">
                       <div className="flex flex-wrap items-center gap-2 mb-1.5">
                         <h3 className="text-lg font-display font-bold text-deep-navy dark:text-slate-100">{item.id}</h3>
+                        {(item.patientName || (item as any).patient_name) && (
+                          <span className="text-xs font-semibold px-2.5 py-0.5 rounded-lg bg-blue-50 dark:bg-blue-950/60 text-[#0b5c92] dark:text-blue-300 border border-blue-200 dark:border-blue-800/60 flex items-center gap-1">
+                            <User size={11} /> {item.patientName || (item as any).patient_name}
+                          </span>
+                        )}
+                        {item.patient_id && (
+                          <span className="text-[11px] text-slate-400 font-mono">
+                            {item.patient_id}
+                          </span>
+                        )}
                         <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60">
                           {item.status}
                         </span>
@@ -372,6 +446,42 @@ export default function PatientHistory() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Styled Confirmation Modal */}
+      {confirmModal.isOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 max-w-md w-full shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="w-12 h-12 rounded-2xl bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center mb-4 border border-rose-200 dark:border-rose-900">
+              <Trash2 size={22} />
+            </div>
+            <h3 className="text-xl font-display font-bold text-deep-navy dark:text-slate-100 mb-2">
+              {confirmModal.title}
+            </h3>
+            <p className="text-sm text-slate-500 dark:text-slate-400 mb-6 leading-relaxed">
+              {confirmModal.description}
+            </p>
+            <div className="flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+                className="px-4 py-2 rounded-xl text-sm font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  await confirmModal.onConfirm();
+                  setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                }}
+                className="px-5 py-2 rounded-xl text-sm font-bold bg-rose-600 hover:bg-rose-700 text-white shadow-md shadow-rose-600/20 transition-all cursor-pointer"
+              >
+                Confirm Delete
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

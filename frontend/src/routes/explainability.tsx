@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
-import { useLocation } from 'react-router-dom';
-import { Eye, Loader2, AlertTriangle, Zap, ChevronDown, Download, Maximize2, RefreshCw, Layers, MapPin, Lightbulb, CheckCircle2, Trash2 } from 'lucide-react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { Eye, Loader2, AlertTriangle, Zap, ChevronDown, Download, Maximize2, RefreshCw, Layers, MapPin, Lightbulb, CheckCircle2, Trash2, Plus, ArrowRight } from 'lucide-react';
 import clsx from 'clsx';
 import { useExplainability } from '../services/explainabilityContext';
 
@@ -125,6 +125,7 @@ const PATHOLOGY_ATTRIBUTION: Record<string, { regions: string[]; determinants: s
 
 export default function Explainability() {
   const location = useLocation();
+  const navigate = useNavigate();
 
   const imagePreview = location.state?.imagePreview || sessionStorage.getItem('recentImagePreview') || null;
   const findingsRawStr = sessionStorage.getItem('recentResults');
@@ -177,14 +178,28 @@ export default function Explainability() {
   /* ── No image guard ── */
   if (!imagePreview) {
     return (
-      <div className="max-w-5xl mx-auto py-20 text-center animate-in fade-in duration-500">
-        <div className="w-20 h-20 mx-auto rounded-3xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-6">
-          <Eye size={36} className="text-slate-400" />
+      <div className="max-w-2xl mx-auto py-20 text-center animate-in fade-in duration-500">
+        <div className="w-20 h-20 mx-auto rounded-3xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-6 ring-4 ring-slate-50 dark:ring-slate-800/50 shadow-sm">
+          <Eye size={36} className="text-[#3730a3] dark:text-indigo-400" />
         </div>
-        <h2 className="text-2xl font-display font-bold text-slate-700 dark:text-slate-200 mb-2">No Radiograph Available</h2>
-        <p className="text-slate-500 dark:text-slate-400 max-w-md mx-auto">
-          Run a <strong>New Analysis</strong> first to upload a chest X-ray, then return here to generate ScoreCAM explainability maps.
+        <h2 className="text-2xl font-display font-bold text-deep-navy dark:text-slate-100 mb-2">No Active Radiograph</h2>
+        <p className="text-slate-500 dark:text-slate-400 text-sm max-w-md mx-auto mb-8">
+          Upload a chest X-ray in <strong>New Analysis</strong> or pick any record from <strong>History</strong> to generate ScoreCAM visual attention heatmaps.
         </p>
+        <div className="flex items-center justify-center gap-3">
+          <button
+            onClick={() => navigate('/new-analysis')}
+            className="px-5 py-2.5 bg-[#0b5c92] hover:bg-blue-800 text-white rounded-xl text-sm font-bold shadow-sm transition-all cursor-pointer flex items-center gap-2"
+          >
+            <Plus size={16} /> New Analysis
+          </button>
+          <button
+            onClick={() => navigate('/history')}
+            className="px-5 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-sm font-semibold transition-all cursor-pointer flex items-center gap-2"
+          >
+            Open History <ArrowRight size={14} />
+          </button>
+        </div>
       </div>
     );
   }

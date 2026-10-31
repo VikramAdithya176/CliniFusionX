@@ -53,6 +53,28 @@ export default function AppShell({ children }: AppShellProps) {
     return saved === 'light' ? 'light' : 'dark';
   });
 
+  const [engineOnline, setEngineOnline] = useState<boolean | null>(null);
+
+  // Periodic health check against backend /health endpoint
+  useEffect(() => {
+    let active = true;
+    const checkEngine = async () => {
+      try {
+        const apiBase = (localStorage.getItem('apiBaseUrl') || 'http://localhost:8000').replace(/\/+$/, '');
+        const res = await fetch(`${apiBase}/health`, { signal: AbortSignal.timeout(3500) });
+        if (active) setEngineOnline(res.ok);
+      } catch {
+        if (active) setEngineOnline(false);
+      }
+    };
+    checkEngine();
+    const interval = setInterval(checkEngine, 45000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, []);
+
   // Close sidebar when route changes (mobile UX)
   useEffect(() => {
     setSidebarOpen(false);
@@ -275,6 +297,23 @@ export default function AppShell({ children }: AppShellProps) {
           </div>
           
           <div className="flex items-center gap-2 sm:gap-4">
+            {/* Live Workstation Engine Status Pill */}
+            {engineOnline !== null && (
+              <NavLink
+                to="/settings"
+                className={clsx(
+                  "hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold border transition-colors cursor-pointer",
+                  engineOnline
+                    ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800"
+                    : "bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800"
+                )}
+                title={engineOnline ? "Swin Transformer AI Engine Online" : "Workstation Backend Offline. Click to check Settings."}
+              >
+                <span className={clsx("w-2 h-2 rounded-full", engineOnline ? "bg-emerald-500 animate-pulse" : "bg-rose-500")} />
+                <span>{engineOnline ? "Engine Ready" : "Offline"}</span>
+              </NavLink>
+            )}
+
             {/* Quick Dark/Light Mode Switch Button */}
             <button
               onClick={toggleTheme}

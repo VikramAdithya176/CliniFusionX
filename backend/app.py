@@ -107,7 +107,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )
 
@@ -129,6 +129,17 @@ def load_models():
         logger.info("Initializing Database...")
         Base.metadata.create_all(bind=db_engine)
         
+        # Ensure new columns exist in existing SQLite databases
+        from sqlalchemy import text
+        with db_engine.connect() as conn:
+            try:
+                conn.execute(text("ALTER TABLE analysis_records ADD COLUMN patient_name VARCHAR"))
+                conn.commit()
+                logger.info("Added patient_name column to analysis_records")
+            except Exception:
+                # Column already exists
+                pass
+
         # Seed users if empty
         from database import SessionLocal
         db = SessionLocal()
@@ -188,6 +199,21 @@ def _validate_pdf_upload(pdf: UploadFile) -> None:
             status_code=415,
             detail=f"Unsupported file type '{pdf.content_type}'. Only PDF is allowed for clinical documents."
         )
+
+
+# ── Health & System endpoints ───────────────────────────────────────────────
+
+@app.get("/health", tags=["System"])
+@app.get("/api/v1/health", tags=["System"])
+async def health_check():
+    """System and AI model health check endpoint."""
+    return {
+        "status": "healthy" if _models_ready else "initializing",
+        "models_ready": _models_ready,
+        "engine": "Swin Transformer V2",
+        "version": "1.0.0",
+        "timestamp": datetime.utcnow().isoformat(),
+    }
 
 
 # ── Auth endpoints ────────────────────────────────────────────────────────────
@@ -282,28 +308,179 @@ async def get_me(user: dict = Depends(_require_auth)):
     return {"user": user}
 
 
+class ProfileUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    role: Optional[str] = None
+    department: Optional[str] = None
+
+
+@app.put("/api/v1/auth/profile", tags=["Auth"])
+async def update_profile(
+    body: ProfileUpdateRequest,
+    user: dict = Depends(_require_auth),
+    db: Session = Depends(get_db),
+):
+    """Update profile details for the authenticated user."""
+    db_user = db.query(User).filter(User.username == user["user_id"]).first()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    if body.name is not None and body.name.strip():
+        db_user.name = body.name.strip()
+    if body.role is not None and body.role.strip():
+        db_user.role = body.role.strip()
+    if body.department is not None and body.department.strip():
+        db_user.department = body.department.strip()
+
+    db.commit()
+    db.refresh(db_user)
+
+    # Synchronize in-memory token store if present
+    for token_key, data in _token_store.items():
+        if data.get("user_id") == user["user_id"]:
+            data["name"] = db_user.name
+            data["role"] = db_user.role
+            data["department"] = db_user.department
+
+    return {
+        "message": "Profile updated successfully.",
+        "user": {
+            "id": db_user.username,
+            "name": db_user.name,
+            "role": db_user.role,
+            "department": db_user.department,
+        },
+    }
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+@app.post("/api/v1/auth/change-password", tags=["Auth"])
+async def change_password(
+    body: ChangePasswordRequest,
+    user: dict = Depends(_require_auth),
+    db: Session = Depends(get_db),
+):
+    """Change password for the authenticated user."""
+    if not body.new_password or len(body.new_password) < 6:
+        raise HTTPException(status_code=400, detail="New password must be at least 6 characters long.")
+
+    db_user = db.query(User).filter(User.username == user["user_id"]).first()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    if db_user.password_hash != _hash_password(body.current_password):
+        raise HTTPException(status_code=400, detail="Current password is incorrect.")
+
+    db_user.password_hash = _hash_password(body.new_password)
+    db.commit()
+    return {"message": "Password updated successfully."}
+
+
 # ── Firebase Google Sign-In ───────────────────────────────────────────────────
 
 # Initialise firebase-admin once using the service account JSON.
 # If the file is absent the endpoint returns a clear error instead of crashing.
 _firebase_ready = False
+_firebase_project_id = "clinifusionx"
+_jwks_client = None
+
 try:
     import firebase_admin
     from firebase_admin import credentials as fb_credentials, auth as fb_auth
+    import jwt
+    import requests
+    import email.utils
 
     _sa_path = os.path.join(os.path.dirname(__file__), "firebase-service-account.json")
     if not firebase_admin._apps and os.path.exists(_sa_path):
         cred = fb_credentials.Certificate(_sa_path)
         firebase_admin.initialize_app(cred)
         _firebase_ready = True
-        logger.info("Firebase Admin SDK initialised successfully.")
+        try:
+            with open(_sa_path, "r", encoding="utf-8") as f:
+                sa_data = json.load(f)
+                _firebase_project_id = sa_data.get("project_id", _firebase_project_id)
+        except Exception:
+            pass
+        _jwks_client = jwt.PyJWKClient(
+            "https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com",
+            cache_keys=True,
+            max_cached_keys=10,
+        )
+        logger.info(f"Firebase Admin SDK initialised successfully for project {_firebase_project_id}.")
     elif not os.path.exists(_sa_path):
         logger.warning(
             "firebase-service-account.json not found — /api/v1/auth/google will be unavailable. "
             "Download it from Firebase Console → Project settings → Service accounts."
         )
 except ImportError:
-    logger.warning("firebase-admin package not installed — Google sign-in unavailable.")
+    logger.warning("firebase-admin or jwt package not installed — Google sign-in unavailable.")
+
+
+def _verify_firebase_token_robust(id_token: str) -> dict:
+    """
+    Verify Firebase ID token.
+    First tries standard fb_auth.verify_id_token(id_token, clock_skew_seconds=60).
+    If it fails due to host clock drift (e.g. system clock drifted from Google time),
+    it securely verifies the cryptographic signature with Google's public JWKS certificates
+    and checks expiration against Google's authoritative server timestamp.
+    """
+    try:
+        return fb_auth.verify_id_token(id_token, clock_skew_seconds=60)
+    except Exception as exc:
+        err_msg = str(exc)
+        logger.warning(f"Standard Firebase token verification check: {err_msg}")
+
+        # If it's a clock skew / time drift error, verify signature directly using Google's JWKS
+        if _jwks_client and any(kw in err_msg.lower() for kw in ("early", "clock", "expired", "time")):
+            try:
+                signing_key = _jwks_client.get_signing_key_from_jwt(id_token)
+                payload = jwt.decode(
+                    id_token,
+                    signing_key.key,
+                    algorithms=["RS256"],
+                    audience=_firebase_project_id,
+                    issuer=f"https://securetoken.google.com/{_firebase_project_id}",
+                    options={"verify_exp": False, "verify_iat": False},
+                )
+
+                uid = payload.get("sub") or payload.get("user_id")
+                if not uid:
+                    raise ValueError("Token missing user ID ('sub').")
+
+                # Fetch Google server time to validate expiration independently of local clock drift
+                try:
+                    head_res = requests.head(
+                        "https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com",
+                        timeout=5,
+                    )
+                    google_now = email.utils.parsedate_to_datetime(head_res.headers["Date"]).timestamp()
+                except Exception as net_err:
+                    logger.warning(f"Could not reach Google time endpoint: {net_err}")
+                    google_now = time.time()
+
+                iat = payload.get("iat", 0)
+                exp = payload.get("exp", 0)
+                # Allow a generous 5-minute leeway around Google's authoritative clock
+                if google_now < iat - 300:
+                    raise ValueError(f"Token used before issuance time ({google_now} < {iat}).")
+                if google_now > exp + 300:
+                    raise ValueError(f"Token expired ({google_now} > {exp}). Please sign in again.")
+
+                if "uid" not in payload:
+                    payload["uid"] = uid
+
+                logger.info(f"Firebase token verified via Google JWKS (clock-skew compensated) for user: {uid}")
+                return payload
+            except Exception as jwks_exc:
+                logger.warning(f"JWKS fallback verification failed: {jwks_exc}")
+                raise HTTPException(status_code=401, detail=f"Google token verification failed: {jwks_exc}")
+
+        raise HTTPException(status_code=401, detail=f"Invalid or expired Google token: {exc}")
 
 
 class GoogleTokenRequest(BaseModel):
@@ -325,12 +502,8 @@ async def google_sign_in(body: GoogleTokenRequest, db: Session = Depends(get_db)
             ),
         )
 
-    # 1. Verify the Firebase ID token
-    try:
-        decoded = fb_auth.verify_id_token(body.id_token, clock_skew_seconds=60)
-    except Exception as exc:
-        logger.warning(f"Firebase token verification failed: {exc}")
-        raise HTTPException(status_code=401, detail="Invalid or expired Google token.")
+    # 1. Verify the Firebase ID token (with clock-skew compensation)
+    decoded = _verify_firebase_token_robust(body.id_token)
 
     uid: str  = decoded["uid"]
     email: str = decoded.get("email", f"{uid}@google.com")
@@ -604,6 +777,8 @@ async def explain_finding_legacy(
 class HistoryRecordCreate(BaseModel):
     id: str
     patient_id: Optional[str] = None
+    patient_name: Optional[str] = None
+    patientName: Optional[str] = None
     timestamp: Optional[int] = None
     date: Optional[str] = None
     status: Optional[str] = "Completed"
@@ -639,9 +814,16 @@ async def get_history(user: dict = Depends(_require_auth), db: Session = Depends
             except Exception:
                 report_data = r.report
 
+        # Resolve patient name: check record.patient_name, fallback to associated Patient relation if available
+        resolved_patient_name = r.patient_name or ""
+        if not resolved_patient_name and r.patient:
+            resolved_patient_name = f"{r.patient.first_name} {r.patient.last_name}".strip()
+
         results.append({
             "id": r.id,
             "patient_id": r.patient_id,
+            "patient_name": resolved_patient_name,
+            "patientName": resolved_patient_name,
             "timestamp": r.timestamp or 0,
             "date": r.date or "",
             "status": r.status or "Completed",
@@ -657,6 +839,7 @@ async def get_history(user: dict = Depends(_require_auth), db: Session = Depends
                 "age": r.age or "",
                 "sex": r.sex or "",
                 "clinicalText": r.clinical_text or "",
+                "patientName": resolved_patient_name,
             },
             "image_preview": r.image_preview or "",
             "imagePreview": r.image_preview or ""
@@ -668,6 +851,7 @@ async def save_history(record: HistoryRecordCreate, user: dict = Depends(_requir
     top = record.top_finding or record.topFinding
     img = record.image_preview or record.imagePreview or ""
     clin_text = record.clinical_text or record.clinicalText or ""
+    p_name = record.patient_name or record.patientName or ""
     
     report_data = record.report
     if isinstance(report_data, (dict, list)):
@@ -681,6 +865,7 @@ async def save_history(record: HistoryRecordCreate, user: dict = Depends(_requir
         id=record.id,
         user_id=user["user_id"],
         patient_id=record.patient_id,
+        patient_name=p_name,
         timestamp=record.timestamp or int(datetime.utcnow().timestamp() * 1000),
         date=record.date or datetime.utcnow().strftime("%d %b %Y, %H:%M"),
         status=record.status or "Completed",
@@ -745,6 +930,15 @@ async def create_patient(body: PatientCreate, user: dict = Depends(_require_auth
     db.commit()
     return {"message": "Patient created successfully", "mrn": db_patient.mrn}
 
+@app.delete("/api/v1/patients/{mrn}", tags=["Patients"])
+async def delete_patient(mrn: str, user: dict = Depends(_require_auth), db: Session = Depends(get_db)):
+    from models import Patient
+    p = db.query(Patient).filter(Patient.mrn == mrn).first()
+    if p:
+        db.delete(p)
+        db.commit()
+    return {"message": "Patient deleted successfully"}
+
 @app.delete("/api/v1/history/{record_id}", tags=["History"])
 async def delete_history(record_id: str, user: dict = Depends(_require_auth), db: Session = Depends(get_db)):
     db_record = db.query(AnalysisRecord).filter(AnalysisRecord.id == record_id, AnalysisRecord.user_id == user["user_id"]).first()
@@ -765,6 +959,7 @@ class PdfExportRequest(BaseModel):
     report_date: str
     report: dict
     image_preview: Optional[str] = None
+    patient_name: Optional[str] = None
 
 @app.post("/api/v1/export-pdf", tags=["Export"])
 async def export_pdf(
@@ -779,7 +974,14 @@ async def export_pdf(
     clinician_role = db_user.role if db_user else "Clinician"
     clinician_dept = db_user.department if db_user else "Radiology"
 
-    logger.info(f"[{user['user_id']}] Generating PDF for record {body.record_id}")
+    # Resolve patient name if not directly supplied in request
+    resolved_patient_name = body.patient_name
+    if not resolved_patient_name:
+        db_rec = db.query(AnalysisRecord).filter(AnalysisRecord.id == body.record_id).first()
+        if db_rec and db_rec.patient_name:
+            resolved_patient_name = db_rec.patient_name
+
+    logger.info(f"[{user['user_id']}] Generating PDF for record {body.record_id} (Patient: {resolved_patient_name})")
     try:
         pdf_bytes = generate_report_pdf(
             report_data=body.report,
@@ -789,6 +991,7 @@ async def export_pdf(
             clinician_role=clinician_role,
             clinician_dept=clinician_dept,
             image_base64=body.image_preview,
+            patient_name=resolved_patient_name,
         )
     except Exception as e:
         logger.error(f"PDF generation failed: {e}")

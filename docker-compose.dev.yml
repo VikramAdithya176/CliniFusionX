@@ -1,0 +1,31 @@
+# ── Development override ─────────────────────────────────────────────────────
+# Usage:  docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#
+# What this adds over the base docker-compose.yml:
+#   • A "frontend-watcher" service that runs `npm run build -- --watch`
+#     so every time you save a .tsx/.ts/.css file the dist/ folder is
+#     rebuilt automatically. Because dist/ is already mounted into the
+#     backend container as a volume, the container picks it up immediately
+#     without a restart.
+#   • The backend container gets ENABLE_DOCS=true so /docs is accessible
+#     during development.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  # ── Frontend auto-rebuild watcher ─────────────────────────────────────────
+  frontend-watcher:
+    image: node:18-alpine
+    container_name: clinifusionx_frontend_watcher
+    working_dir: /frontend
+    command: sh -c "npm install && npm run build -- --watch"
+    volumes:
+      - ./frontend:/frontend            # live source mount
+      - ./frontend/dist:/frontend/dist  # write built files back to host dist/
+    environment:
+      - NODE_ENV=development
+    restart: unless-stopped
+
+  # ── Backend overrides for dev ──────────────────────────────────────────────
+  clinifusionx:
+    environment:
+      - ENABLE_DOCS=true   # expose /docs and /redoc in dev
