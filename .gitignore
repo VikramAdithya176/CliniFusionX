@@ -33,6 +33,7 @@ node_modules/
 frontend/node_modules/
 dist/
 frontend/dist/
+backend/frontend_dist/
 
 # IDE
 .vscode/

@@ -41,9 +41,10 @@ try {
 
 # Check .env exists
 if (-Not (Test-Path ".env")) {
-    Write-Host "⚠  No .env file found. Copying from .env.example ..." -ForegroundColor Yellow
-    Copy-Item ".env.example" ".env"
-    Write-Host "   Edit .env and add your GEMINI_API_KEY before proceeding." -ForegroundColor Yellow
+    Write-Host "⚠  No .env file found. Please create a .env file at the project root." -ForegroundColor Yellow
+    Write-Host "   Required keys: GEMINI_API_KEY, ALLOWED_ORIGINS (optional)" -ForegroundColor Yellow
+    Write-Host "   Example:" -ForegroundColor Yellow
+    Write-Host "     GEMINI_API_KEY=your_key_here" -ForegroundColor Gray
     Write-Host ""
 }
 

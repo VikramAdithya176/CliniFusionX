@@ -38,7 +38,6 @@ COPY backend/app.py \
      backend/clinical_extractor.py \
      backend/report_generator.py \
      backend/ccm.py \
-     backend/gated_fusion.py \
      backend/database.py \
      backend/models.py \
      backend/pdf_exporter.py \
