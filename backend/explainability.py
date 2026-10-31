@@ -89,14 +89,13 @@ class Explainer:
             reshape_transform=reshape_transform
         )
         
-        # FastScoreCAM evaluating top 32 feature maps in batches (~7-8s vs 70+s)
-        self.score_cam = FastScoreCAM(
+        # Standard ScoreCAM evaluating all 768 feature maps across the layer for full anatomical fidelity
+        self.score_cam = ScoreCAM(
             model=self.model,
             target_layers=self.target_layers,
-            reshape_transform=reshape_transform,
-            top_k=32,
-            batch_size=16
+            reshape_transform=reshape_transform
         )
+        self.score_cam.batch_size = 32
 
     def generate_heatmap(self, input_tensor, original_image, class_idx=None, cam_method='gradcam'):
         """
@@ -118,8 +117,8 @@ class Explainer:
             
         grayscale_cam = grayscale_cam[0, :]
         
-        # Noise Reduction: Zero out weak low-level background activations (< 0.25 threshold)
-        threshold = 0.25
+        # Noise Reduction: Zero out weak low-level background noise while preserving diffuse lung signals
+        threshold = 0.15 if cam_method == 'scorecam' else 0.20
         grayscale_cam[grayscale_cam < threshold] = 0.0
         
         # Re-normalize remaining non-zero activation signal

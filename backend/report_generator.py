@@ -173,7 +173,7 @@ class ReportGenerator:
                 Format your response as a valid JSON object with EXACTLY these six keys containing Markdown text:
                 {{
                     "clinical_context": "1-2 clear paragraphs describing why the chest X-ray was taken and what the patient came in with, using the patient's own symptoms and vitals. Simple, readable language.",
-                    "image_model_findings": "A clear section listing what was found on the chest X-ray, organized into: Main Findings (high confidence), Additional Observations (moderate confidence), and Normal/Unlikely (not found). For each finding, give a one-sentence plain-language explanation of what it means clinically. Do NOT mention AI, model names, thresholds, or datasets.",
+                    "image_model_findings": "A clear section listing what was found on the chest X-ray. List each finding with its name and confidence percentage: - **[Disease]**: **[Confidence]%** — [one-sentence plain-language explanation]. Organise into: Main Findings (high confidence), Additional Observations (moderate confidence), and Not Detected / Unlikely.",
                     "clinical_information": "A structured summary of the patient's profile: age/sex, symptoms, vital signs (with brief note if any are abnormal), and lab values (with brief note if significant). Use normal formatting, not excessive bullet symbols.",
                     "integrated_interpretation": "2-3 readable paragraphs connecting what the X-ray shows with how the patient is feeling and their test results. Explain in clear terms why these findings matter and what they likely indicate. Use medical terms but explain each one simply.",
                     "possible_findings": "A numbered list of 3-4 possible diagnoses (what the findings could mean), written clearly. For each one, explain in 1-2 sentences why it is being considered and what it means for the patient.",
@@ -190,15 +190,24 @@ class ReportGenerator:
                     
                 llm_output = json.loads(resp_text)
                 
-                # Verify non-empty output
-                if llm_output.get("clinical_context") and llm_output.get("integrated_interpretation"):
+                # Robust extraction with alias matching
+                c_context = llm_output.get("clinical_context") or llm_output.get("clinical_indication") or llm_output.get("indication") or ""
+                img_findings = llm_output.get("image_model_findings") or llm_output.get("xray_findings") or llm_output.get("findings") or ""
+                c_info = llm_output.get("clinical_information") or llm_output.get("patient_information") or llm_output.get("patient_profile") or ""
+                interp = llm_output.get("integrated_interpretation") or llm_output.get("interpretation") or llm_output.get("impression") or ""
+                poss_findings = llm_output.get("possible_findings") or llm_output.get("differential_diagnosis") or llm_output.get("possible_diagnoses") or llm_output.get("differentials") or ""
+                next_steps = llm_output.get("recommended_next_steps") or llm_output.get("recommendations") or llm_output.get("next_steps") or ""
+
+                # If core sections exist, merge with rule-based fallback for any missing/empty sub-sections
+                if c_context.strip() and interp.strip():
+                    fallback = self._generate_rule_based_report(image_findings, raw_clinical_text)
                     return {
-                        "clinical_context": llm_output.get("clinical_context", ""),
-                        "image_model_findings": llm_output.get("image_model_findings", ""),
-                        "clinical_information": llm_output.get("clinical_information", ""),
-                        "integrated_interpretation": llm_output.get("integrated_interpretation", ""),
-                        "possible_findings": llm_output.get("possible_findings", ""),
-                        "recommended_next_steps": llm_output.get("recommended_next_steps", "")
+                        "clinical_context": c_context.strip() if c_context.strip() else fallback["clinical_context"],
+                        "image_model_findings": img_findings.strip() if img_findings.strip() else fallback["image_model_findings"],
+                        "clinical_information": c_info.strip() if c_info.strip() else fallback["clinical_information"],
+                        "integrated_interpretation": interp.strip() if interp.strip() else fallback["integrated_interpretation"],
+                        "possible_findings": poss_findings.strip() if poss_findings.strip() else fallback["possible_findings"],
+                        "recommended_next_steps": next_steps.strip() if next_steps.strip() else fallback["recommended_next_steps"]
                     }
             except Exception as e:
                 print(f"LLM generation failed, switching to clinical rules fallback: {e}")
@@ -212,6 +221,11 @@ class ReportGenerator:
         
         primary_findings = [f for f in sorted_findings if f.get('probability', 0) >= 0.50]
         secondary_findings = [f for f in sorted_findings if 0.15 <= f.get('probability', 0) < 0.50]
+        minor_findings = [f for f in sorted_findings if f.get('probability', 0) < 0.15]
+        top_name = top_finding.get('disease', 'No Finding') if isinstance(top_finding, dict) else 'No Finding'
+        top_kb = DISEASE_KNOWLEDGE_BASE.get(top_name, {})
+        text = raw_clinical_text.strip() if raw_clinical_text else ""
+
         # -------------------------------------------------------------
         # 1. CLINICAL CONTEXT
         # -------------------------------------------------------------
@@ -246,15 +260,15 @@ class ReportGenerator:
                 p_val = f['probability'] * 100
                 d_name = f['disease']
                 d_info = DISEASE_KNOWLEDGE_BASE.get(d_name, {})
-                # Get a plain-language description — first sentence only to keep it readable
                 full_desc = d_info.get('desc', 'An abnormal pattern was detected in this area.')
                 short_desc = full_desc.split('.')[0] + '.'
                 lines_img.append(
-                    f"- **{d_name}** — {short_desc}"
+                    f"- **{d_name}**: **{p_val:.1f}%** — {short_desc}"
                 )
         else:
+            top_prob = top_finding.get('probability', 0) * 100 if isinstance(top_finding, dict) else 0.0
             lines_img.append(
-                f"### Leading Observation:\n- **{top_name}** — {DISEASE_KNOWLEDGE_BASE.get(top_name, {}).get('desc', 'An abnormality was noted.').split('.')[0]}."
+                f"### Leading Observation:\n- **{top_name}**: **{top_prob:.1f}%** — {DISEASE_KNOWLEDGE_BASE.get(top_name, {}).get('desc', 'An abnormality was noted.').split('.')[0]}."
             )
 
         if secondary_findings:
@@ -263,7 +277,8 @@ class ReportGenerator:
                 d_name = f['disease']
                 d_info = DISEASE_KNOWLEDGE_BASE.get(d_name, {})
                 short_desc = d_info.get('desc', 'A possible secondary finding was noted.').split('.')[0] + '.'
-                lines_img.append(f"- **{d_name}** — {short_desc}")
+                p_val = f.get('probability', 0) * 100
+                lines_img.append(f"- **{d_name}**: **{p_val:.1f}%** — {short_desc}")
 
         if minor_findings:
             minor_str = ", ".join([f['disease'] for f in minor_findings[:7]])

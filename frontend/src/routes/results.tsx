@@ -182,7 +182,7 @@ export default function Results() {
             <Eye size={16} /> Explain with ScoreCAM
           </button>
           <button
-            onClick={() => navigate('/report', { state: { reportText: reportData, recordId, date: recordDate, patientName: location.state?.patientName || activePatient?.patientName } })}
+            onClick={() => navigate('/report', { state: { reportText: reportData, recordId, date: recordDate, patientName: location.state?.patientName || activePatient?.patientName, findings: results?.findings || activePatient?.findings } })}
             className="px-4 py-2 bg-[#0b5c92] hover:bg-blue-800 text-white rounded-lg text-sm font-semibold shadow-sm flex items-center gap-2 transition-colors cursor-pointer"
           >
             <FileText size={16} /> Clinical Report

@@ -67,16 +67,55 @@ export default function ClinicalReport() {
   const isObject = typeof reportData === 'object' && reportData !== null;
   const rawFallback = !isObject ? (reportData || "No clinical report data was generated. Please run an analysis first.") : "";
 
+  const findingsList = location.state?.findings || activePatient?.findings || [];
+
+  // Extract ranked findings: first check direct structured findings, then fallback to multi-regex parsing
+  const getRankedFindings = () => {
+    if (Array.isArray(findingsList) && findingsList.length > 0) {
+      return [...findingsList]
+        .map((f: any) => ({
+          name: f.disease || f.name,
+          prob: typeof f.probability === 'number' 
+            ? (f.probability <= 1.0 ? f.probability * 100 : f.probability) 
+            : parseFloat(f.prob || 0)
+        }))
+        .filter((item: any) => item.prob > 1)
+        .sort((a: any, b: any) => b.prob - a.prob)
+        .slice(0, 5);
+    }
+    
+    // Multi-regex fallback parsing from image_model_findings markdown
+    const findingsText = (typeof reportData === 'object' && reportData ? reportData.image_model_findings : '') || '';
+    const patterns = [
+      /\*\*([A-Za-z_\s]+)\*\*:\s*\*\*(\d+\.?\d*)%\*\*/g,
+      /\*\*([A-Za-z_\s]+)\*\*\s*[:—–-]\s*\*\*?(\d+\.?\d*)%?\*\*?/g,
+      /\*\*([A-Za-z_\s]+)\*\*\s*\((\d+\.?\d*)%\)/g,
+      /[-*]\s*([A-Za-z_\s]+)\s*[:—–-]\s*(\d+\.?\d*)%/g
+    ];
+
+    const foundMap = new Map<string, number>();
+    for (const pat of patterns) {
+      const matches = [...findingsText.matchAll(pat)];
+      for (const m of matches) {
+        const name = m[1].trim();
+        const prob = parseFloat(m[2]);
+        if (!isNaN(prob) && !foundMap.has(name.toLowerCase())) {
+          foundMap.set(name.toLowerCase(), prob);
+        }
+      }
+    }
+
+    return Array.from(foundMap.entries())
+      .map(([name, prob]) => ({ name: name.charAt(0).toUpperCase() + name.slice(1), prob }))
+      .sort((a, b) => b.prob - a.prob)
+      .slice(0, 5);
+  };
+
   // Plain text generator for copy / export – uses the new hospital-style layout
   const getPlainTextReport = () => {
     if (isObject) {
-      // Build a concise impression from image_model_findings
-      const findingsText = reportData.image_model_findings || '';
-      const probMatches = [...findingsText.matchAll(/\*\*([A-Za-z_\s]+)\*\*:\s*\*\*(\d+\.?\d*)%\*\*/g)];
-      const rankedItems = probMatches
-        .map(m => ({ name: m[1].trim(), prob: parseFloat(m[2]) }))
-        .sort((a, b) => b.prob - a.prob)
-        .slice(0, 5);
+      // Build a concise impression from ranked findings
+      const rankedItems = getRankedFindings();
       const impressionLines = rankedItems.length > 0
         ? rankedItems.map((item, i) => {
             const level = item.prob >= 50 ? 'HIGH' : item.prob >= 15 ? 'MODERATE' : 'LOW';
@@ -250,22 +289,38 @@ Report generated on ${displayDate} | Record ${displayRecordId}
     }
   };
 
-  const MarkdownContent = ({ content }: { content: string }) => (
-    <ReactMarkdown
-      components={{
-        p: ({node, ...props}) => <p className="mb-3 last:mb-0 leading-relaxed text-slate-700 dark:text-slate-300" {...props} />,
-        ul: ({node, ...props}) => <ul className="list-disc pl-5 mb-4 space-y-2 text-slate-700 dark:text-slate-300" {...props} />,
-        ol: ({node, ...props}) => <ol className="list-decimal pl-5 mb-4 space-y-2 text-slate-700 dark:text-slate-300" {...props} />,
-        li: ({node, ...props}) => <li className="pl-1" {...props} />,
-        strong: ({node, ...props}) => <strong className="font-semibold text-deep-navy dark:text-slate-100" {...props} />,
-        h1: ({node, ...props}) => <h1 className="text-xl font-bold mt-4 mb-2 text-deep-navy dark:text-slate-100" {...props} />,
-        h2: ({node, ...props}) => <h2 className="text-lg font-bold mt-4 mb-2 text-deep-navy dark:text-slate-100" {...props} />,
-        h3: ({node, ...props}) => <h3 className="text-md font-bold mt-3 mb-1 text-deep-navy dark:text-slate-100" {...props} />,
-      }}
-    >
-      {content || "No data provided."}
-    </ReactMarkdown>
-  );
+  const toMarkdownString = (val: any): string => {
+    if (!val) return '';
+    if (typeof val === 'string') return val.trim();
+    if (Array.isArray(val)) {
+      return val
+        .map((item) => (typeof item === 'string' ? item : JSON.stringify(item)))
+        .join('\n\n')
+        .trim();
+    }
+    if (typeof val === 'object') return JSON.stringify(val, null, 2).trim();
+    return String(val).trim();
+  };
+
+  const MarkdownContent = ({ content }: { content: any }) => {
+    const text = toMarkdownString(content);
+    return (
+      <ReactMarkdown
+        components={{
+          p: ({node, ...props}) => <p className="mb-3 last:mb-0 leading-relaxed text-slate-700 dark:text-slate-300" {...props} />,
+          ul: ({node, ...props}) => <ul className="list-disc pl-5 mb-4 space-y-2 text-slate-700 dark:text-slate-300" {...props} />,
+          ol: ({node, ...props}) => <ol className="list-decimal pl-5 mb-4 space-y-2 text-slate-700 dark:text-slate-300" {...props} />,
+          li: ({node, ...props}) => <li className="pl-1" {...props} />,
+          strong: ({node, ...props}) => <strong className="font-semibold text-deep-navy dark:text-slate-100" {...props} />,
+          h1: ({node, ...props}) => <h1 className="text-xl font-bold mt-4 mb-2 text-deep-navy dark:text-slate-100" {...props} />,
+          h2: ({node, ...props}) => <h2 className="text-lg font-bold mt-4 mb-2 text-deep-navy dark:text-slate-100" {...props} />,
+          h3: ({node, ...props}) => <h3 className="text-md font-bold mt-3 mb-1 text-deep-navy dark:text-slate-100" {...props} />,
+        }}
+      >
+        {text || "No data provided."}
+      </ReactMarkdown>
+    );
+  };
 
   /* ── Reusable section heading (numbered circle + title) ── */
   const SectionHeading = ({ num, title }: { num: number; title: string }) => (
@@ -527,13 +582,15 @@ Report generated on ${displayDate} | Record ${displayRecordId}
                   </div>
 
                   {/* 5-D: Additional Considerations */}
-                  <div>
-                    <h4 className="font-semibold text-deep-navy dark:text-slate-100 mb-2 flex items-center gap-2">
-                      <span className="text-xs font-bold text-[#0b5c92] dark:text-blue-400 bg-blue-50 dark:bg-blue-950 px-2 py-0.5 rounded-md">D</span>
-                      Additional Considerations
-                    </h4>
-                    <MarkdownContent content={reportData.possible_findings} />
-                  </div>
+                  {toMarkdownString(reportData.possible_findings) ? (
+                    <div>
+                      <h4 className="font-semibold text-deep-navy dark:text-slate-100 mb-2 flex items-center gap-2">
+                        <span className="text-xs font-bold text-[#0b5c92] dark:text-blue-400 bg-blue-50 dark:bg-blue-950 px-2 py-0.5 rounded-md">D</span>
+                        Additional Considerations
+                      </h4>
+                      <MarkdownContent content={reportData.possible_findings} />
+                    </div>
+                  ) : null}
                 </div>
               </div>
 
@@ -550,13 +607,7 @@ Report generated on ${displayDate} | Record ${displayRecordId}
                   <div className="bg-amber-50 dark:bg-amber-950/30 border-2 border-amber-400 dark:border-amber-600 rounded-2xl p-5 space-y-4">
                     {/* Extract and display ranked findings */}
                     {(() => {
-                      // Parse top findings from image_model_findings markdown
-                      const findings = reportData.image_model_findings || '';
-                      const matches = [...findings.matchAll(/\*\*([A-Za-z_\s]+)\*\*:\s*\*\*(\d+\.?\d*)%\*\*/g)];
-                      const topItems = matches
-                        .map(m => ({ name: m[1].trim(), prob: parseFloat(m[2]) }))
-                        .sort((a, b) => b.prob - a.prob)
-                        .slice(0, 5);
+                      const topItems = getRankedFindings();
 
                       if (topItems.length === 0) {
                         return <p className="text-slate-700 dark:text-slate-300">No significant AI findings to summarise. Clinical correlation advised.</p>;
@@ -593,11 +644,10 @@ Report generated on ${displayDate} | Record ${displayRecordId}
                     <div className="pt-3 border-t border-amber-200 dark:border-amber-800/50">
                       <p className="text-slate-700 dark:text-slate-300 leading-relaxed">
                         <strong>Summary:</strong> AI analysis {(() => {
-                          const findings = reportData.image_model_findings || '';
-                          const matches = [...findings.matchAll(/\*\*([A-Za-z_\s]+)\*\*:\s*\*\*(\d+\.?\d*)%\*\*/g)];
-                          const highConf = matches.filter(m => parseFloat(m[2]) >= 50);
+                          const topItems = getRankedFindings();
+                          const highConf = topItems.filter(item => item.prob >= 50);
                           if (highConf.length > 0) {
-                            const names = highConf.map(m => m[1].trim()).join(', ');
+                            const names = highConf.map(m => m.name).join(', ');
                             return `identifies high-confidence findings for ${names}. `;
                           }
                           return 'did not identify any high-confidence (≥50%) pathology. ';
@@ -623,7 +673,12 @@ Report generated on ${displayDate} | Record ${displayRecordId}
               <div className="mb-10">
                 <SectionHeading num={5} title="Recommendations" />
                 <div className="pl-11 text-[15px]">
-                  <MarkdownContent content={reportData.recommended_next_steps} />
+                  <MarkdownContent 
+                    content={
+                      toMarkdownString(reportData.recommended_next_steps) ||
+                      "### 1. Immediate Care\n- Check vital signs regularly and monitor pulse oximetry.\n- Maintain supportive respiratory care.\n\n### 2. Follow-Up\n- A licensed radiologist should formally review this report before clinical decision-making.\n- A repeat chest X-ray in 48–72 hours is recommended to monitor resolution.\n- Correlate with complete blood count (CBC) and inflammatory markers (CRP)."
+                    } 
+                  />
                 </div>
               </div>
 
