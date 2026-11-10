@@ -1,7 +1,7 @@
 # ============================================================
 # Stage 1: Build the React/Vite frontend
 # ============================================================
-FROM node:20-slim AS frontend-builder
+FROM node:22-slim AS frontend-builder
 
 WORKDIR /frontend
 
@@ -43,11 +43,8 @@ COPY backend/app.py \
      backend/pdf_exporter.py \
      ./
 
-# Copy JSON config files
-COPY backend/config.json backend/labels.json backend/thresholds.json backend/firebase-service-account.json ./
-
-# Copy model weights
-COPY best_swin_chestxray14.pth .
+# Copy JSON config files and optional secrets/weights (when present in build context)
+COPY backend/config.json backend/labels.json backend/thresholds.json backend/firebase-service-account.jso[n] best_swin_chestxray14.pt[h] ./
 
 # Copy React build
 COPY --from=frontend-builder /frontend/dist ./frontend_dist/
