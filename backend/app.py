@@ -139,6 +139,13 @@ def load_models():
             except Exception:
                 # Column already exists
                 pass
+            try:
+                conn.execute(text("ALTER TABLE patients ADD COLUMN created_at INTEGER"))
+                conn.commit()
+                logger.info("Added created_at column to patients")
+            except Exception:
+                # Column already exists
+                pass
 
         # Seed users if empty
         from database import SessionLocal
@@ -892,31 +899,72 @@ async def save_history(record: HistoryRecordCreate, user: dict = Depends(_requir
     return {"message": "Saved", "id": db_record.id}
 
 class PatientCreate(BaseModel):
-    mrn: str
+    mrn: Optional[str] = None
     first_name: str
     last_name: Optional[str] = ""
     date_of_birth: Optional[str] = "N/A"
     sex: Optional[str] = "Unknown"
+    created_at: Optional[int] = None
+    allow_update: Optional[bool] = True
+
+
+def _generate_unique_mrn(db: Session) -> str:
+    """Generate a random MRN guaranteed not to collide with existing patients."""
+    from models import Patient
+    for _ in range(100):
+        candidate = f"MRN-{100000 + secrets.randbelow(900000)}"
+        if not db.query(Patient).filter(Patient.mrn == candidate).first():
+            return candidate
+    # Fallback to 8-digit suffix if 6-digit space is heavily populated
+    while True:
+        candidate = f"MRN-{10000000 + secrets.randbelow(90000000)}"
+        if not db.query(Patient).filter(Patient.mrn == candidate).first():
+            return candidate
+
 
 @app.get("/api/v1/patients", tags=["Patients"])
 async def get_patients(user: dict = Depends(_require_auth), db: Session = Depends(get_db)):
     from models import Patient
     patients = db.query(Patient).all()
-    return [{"mrn": p.mrn, "first_name": p.first_name, "last_name": p.last_name or "", "date_of_birth": p.date_of_birth or "N/A", "sex": p.sex or "Unknown"} for p in patients]
+    return [
+        {
+            "mrn": p.mrn,
+            "first_name": p.first_name,
+            "last_name": p.last_name or "",
+            "date_of_birth": p.date_of_birth or "N/A",
+            "sex": p.sex or "Unknown",
+            "created_at": p.created_at,
+        }
+        for p in patients
+    ]
+
 
 @app.get("/api/v1/patients/{mrn}", tags=["Patients"])
 async def get_patient(mrn: str, user: dict = Depends(_require_auth), db: Session = Depends(get_db)):
     from models import Patient
-    p = db.query(Patient).filter(Patient.mrn == mrn).first()
+    normalized_mrn = mrn.strip().upper()
+    p = db.query(Patient).filter(Patient.mrn == normalized_mrn).first() or db.query(Patient).filter(Patient.mrn == mrn).first()
     if not p:
         raise HTTPException(status_code=404, detail="Patient not found")
-    return {"mrn": p.mrn, "first_name": p.first_name, "last_name": p.last_name or "", "date_of_birth": p.date_of_birth or "N/A", "sex": p.sex or "Unknown"}
+    return {
+        "mrn": p.mrn,
+        "first_name": p.first_name,
+        "last_name": p.last_name or "",
+        "date_of_birth": p.date_of_birth or "N/A",
+        "sex": p.sex or "Unknown",
+        "created_at": p.created_at,
+    }
+
 
 @app.post("/api/v1/patients", tags=["Patients"])
 async def create_patient(body: PatientCreate, user: dict = Depends(_require_auth), db: Session = Depends(get_db)):
     from models import Patient
-    p = db.query(Patient).filter(Patient.mrn == body.mrn).first()
+    mrn = body.mrn.strip().upper() if body.mrn and body.mrn.strip() else _generate_unique_mrn(db)
+
+    p = db.query(Patient).filter(Patient.mrn == mrn).first()
     if p:
+        if body.allow_update is False:
+            raise HTTPException(status_code=409, detail=f"A patient with MRN '{mrn}' already exists.")
         # Update existing patient demographics if updated
         if body.first_name:
             p.first_name = body.first_name
@@ -926,24 +974,30 @@ async def create_patient(body: PatientCreate, user: dict = Depends(_require_auth
             p.date_of_birth = body.date_of_birth
         if body.sex and body.sex != "Unknown":
             p.sex = body.sex
+        if not p.created_at:
+            p.created_at = body.created_at or int(time.time() * 1000)
         db.commit()
-        return {"message": "Patient updated successfully", "mrn": p.mrn}
+        return {"message": "Patient updated successfully", "mrn": p.mrn, "created_at": p.created_at}
 
+    created_ts = body.created_at or int(time.time() * 1000)
     db_patient = Patient(
-        mrn=body.mrn,
+        mrn=mrn,
         first_name=body.first_name,
         last_name=body.last_name or "",
         date_of_birth=body.date_of_birth or "N/A",
-        sex=body.sex or "Unknown"
+        sex=body.sex or "Unknown",
+        created_at=created_ts,
     )
     db.add(db_patient)
     db.commit()
-    return {"message": "Patient created successfully", "mrn": db_patient.mrn}
+    return {"message": "Patient created successfully", "mrn": db_patient.mrn, "created_at": db_patient.created_at}
+
 
 @app.delete("/api/v1/patients/{mrn}", tags=["Patients"])
 async def delete_patient(mrn: str, user: dict = Depends(_require_auth), db: Session = Depends(get_db)):
     from models import Patient
-    p = db.query(Patient).filter(Patient.mrn == mrn).first()
+    normalized_mrn = mrn.strip().upper()
+    p = db.query(Patient).filter(Patient.mrn == normalized_mrn).first() or db.query(Patient).filter(Patient.mrn == mrn).first()
     if p:
         db.delete(p)
         db.commit()

@@ -1,12 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { 
   Sun, Moon, ShieldCheck, Info, CheckCircle2, RotateCcw, Sliders, 
-  Server, Download, Trash2, Activity, Loader2 
+  Download, Trash2, User, ArrowRight
 } from 'lucide-react';
 import clsx from 'clsx';
 import { getHistory } from '../services/historyService';
+import { getAuthUser, DEFAULT_CLINICIAN, type AuthUser } from '../services/authService';
 
 export default function Settings() {
+  const navigate = useNavigate();
+  const [currentUser, setCurrentUser] = useState<AuthUser>(() => getAuthUser() || DEFAULT_CLINICIAN);
+
   // Appearance
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     return localStorage.getItem('app_theme') === 'light' ? 'light' : 'dark';
@@ -28,18 +33,6 @@ export default function Settings() {
     return localStorage.getItem('pref_storeHistory') !== 'false';
   });
 
-  // Workstation API Base
-  const [apiBase, setApiBase] = useState<string>(() => {
-    return localStorage.getItem('apiBaseUrl') || 'http://localhost:8000';
-  });
-  const [pingStatus, setPingStatus] = useState<{
-    tested: boolean;
-    online: boolean;
-    latencyMs?: number;
-    details?: string;
-  } | null>(null);
-  const [pinging, setPinging] = useState(false);
-
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const showToast = (msg: string) => {
@@ -52,11 +45,18 @@ export default function Settings() {
       const current = localStorage.getItem('app_theme');
       setTheme(current === 'light' ? 'light' : 'dark');
     };
+    const handleAuthChange = () => {
+      setCurrentUser(getAuthUser() || DEFAULT_CLINICIAN);
+    };
     window.addEventListener('storage', handleThemeEvent);
     window.addEventListener('themeChange', handleThemeEvent);
+    window.addEventListener('authUserChange', handleAuthChange);
+    window.addEventListener('storage', handleAuthChange);
     return () => {
       window.removeEventListener('storage', handleThemeEvent);
       window.removeEventListener('themeChange', handleThemeEvent);
+      window.removeEventListener('authUserChange', handleAuthChange);
+      window.removeEventListener('storage', handleAuthChange);
     };
   }, []);
 
@@ -77,51 +77,6 @@ export default function Settings() {
     setter(newVal);
     localStorage.setItem(key, String(newVal));
     showToast(`${label}: ${newVal ? 'Enabled' : 'Disabled'}`);
-  };
-
-  const handleSaveApiBase = (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleanUrl = apiBase.trim().replace(/\/+$/, '');
-    localStorage.setItem('apiBaseUrl', cleanUrl);
-    setApiBase(cleanUrl);
-    showToast('Workstation API URL saved.');
-    handleTestConnection(cleanUrl);
-  };
-
-  const handleTestConnection = async (targetUrl?: string) => {
-    const url = (targetUrl || apiBase).trim().replace(/\/+$/, '');
-    setPinging(true);
-    const start = performance.now();
-    try {
-      const res = await fetch(`${url}/health`, {
-        signal: AbortSignal.timeout(6000),
-      });
-      const latency = Math.round(performance.now() - start);
-      if (res.ok) {
-        const data = await res.json().catch(() => ({}));
-        setPingStatus({
-          tested: true,
-          online: true,
-          latencyMs: latency,
-          details: data.engine ? `${data.engine} (${data.status})` : 'API Online',
-        });
-        showToast(`Connected to backend in ${latency}ms`);
-      } else {
-        setPingStatus({
-          tested: true,
-          online: false,
-          details: `Server returned HTTP ${res.status}`,
-        });
-      }
-    } catch (err: any) {
-      setPingStatus({
-        tested: true,
-        online: false,
-        details: 'Unable to reach backend. Check Docker container or network.',
-      });
-    } finally {
-      setPinging(false);
-    }
   };
 
   const handleExportData = async () => {
@@ -151,8 +106,6 @@ export default function Settings() {
     setHighlightHighRisk(true); localStorage.setItem('pref_highlightHighRisk', 'true');
     setRequireClinicalContext(false); localStorage.setItem('pref_requireClinicalContext', 'false');
     setStoreHistory(true); localStorage.setItem('pref_storeHistory', 'true');
-    setApiBase('http://localhost:8000'); localStorage.setItem('apiBaseUrl', 'http://localhost:8000');
-    setPingStatus(null);
     showToast('Settings reset to defaults');
   };
 
@@ -168,7 +121,7 @@ export default function Settings() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
         <div>
           <h1 className="text-3xl font-display font-bold text-deep-navy dark:text-slate-100">Settings</h1>
-          <p className="text-slate-500 dark:text-slate-400 mt-1">Workstation preferences, connectivity, and clinical privacy controls.</p>
+          <p className="text-slate-500 dark:text-slate-400 mt-1">Workstation preferences and clinical privacy controls.</p>
         </div>
         <button
           onClick={handleResetDefaults}
@@ -180,59 +133,35 @@ export default function Settings() {
 
       <div className="space-y-6">
 
-        {/* Workstation Backend Connectivity */}
-        <div className="card-surface p-8">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="text-lg font-display font-bold text-deep-navy dark:text-slate-100 flex items-center gap-2">
-                <Server size={18} className="text-[#0b5c92] dark:text-sky-400" /> Backend Workstation Connection
-              </h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400">Configure and test the AI inference server address</p>
+        {/* Doctor Profile Shortcut */}
+        <div className="card-surface p-6 sm:p-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-4 min-w-0">
+            <div className="w-12 h-12 rounded-full bg-gradient-to-br from-rose-400 to-rose-600 text-white flex items-center justify-center font-bold text-lg shrink-0 shadow-sm">
+              {currentUser.name.charAt(0) || 'D'}
             </div>
-            {pingStatus?.tested && (
-              <span className={clsx(
-                'inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border',
-                pingStatus.online 
-                  ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
-                  : 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800'
-              )}>
-                <span className={clsx('w-2 h-2 rounded-full', pingStatus.online ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500')} />
-                {pingStatus.online ? `Online (${pingStatus.latencyMs}ms)` : 'Offline'}
-              </span>
-            )}
-          </div>
-
-          <form onSubmit={handleSaveApiBase} className="space-y-3">
-            <div className="flex flex-col sm:flex-row gap-2">
-              <input
-                type="text"
-                value={apiBase}
-                onChange={(e) => setApiBase(e.target.value)}
-                placeholder="http://localhost:8000"
-                className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50 text-sm font-mono text-deep-navy dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary/20"
-              />
-              <button
-                type="button"
-                onClick={() => handleTestConnection()}
-                disabled={pinging}
-                className="px-4 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
-              >
-                {pinging ? <Loader2 size={14} className="animate-spin" /> : <Activity size={14} />}
-                Test Ping
-              </button>
-              <button
-                type="submit"
-                className="px-4 py-2.5 bg-[#0b5c92] hover:bg-blue-800 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer shadow-sm"
-              >
-                Save
-              </button>
-            </div>
-            {pingStatus?.details && (
-              <p className={clsx('text-xs font-medium', pingStatus.online ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400')}>
-                {pingStatus.details}
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <h3 className="text-lg font-display font-bold text-deep-navy dark:text-slate-100 truncate">
+                  {currentUser.name}
+                </h3>
+                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950/50 text-[#0b5c92] dark:text-sky-400 border border-blue-200/70 dark:border-blue-800/70 shrink-0">
+                  Doctor Profile
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                {currentUser.role} • {currentUser.department}
               </p>
-            )}
-          </form>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => navigate('/profile')}
+            className="px-4 py-2.5 bg-[#0b5c92] hover:bg-blue-800 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer shadow-sm shrink-0"
+          >
+            <User size={15} />
+            <span>View & Edit Doctor Profile</span>
+            <ArrowRight size={14} />
+          </button>
         </div>
 
         {/* Appearance */}

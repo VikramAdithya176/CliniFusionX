@@ -5,6 +5,7 @@ export interface Patient {
   first_name: string;
   last_name: string;
   date_of_birth: string;
+  age?: string;
   sex: string;
   createdAt?: number;
 }
@@ -64,7 +65,7 @@ export async function getPatients(): Promise<Patient[]> {
     console.warn('Backend /api/v1/patients unavailable, falling back to local cache', err);
   }
 
-  // Merge server and local patients by MRN (server records take precedence)
+  // Merge server and local patients by MRN (server records take precedence, preserving createdAt)
   const map = new Map<string, Patient>();
 
   for (const p of localList) {
@@ -73,9 +74,15 @@ export async function getPatients(): Promise<Patient[]> {
     }
   }
 
-  for (const p of serverList) {
+  for (const p of serverList as Array<Patient & { created_at?: number | null }>) {
     if (p && p.mrn) {
-      map.set(p.mrn.toUpperCase(), p);
+      const key = p.mrn.toUpperCase();
+      const localMatch = map.get(key);
+      map.set(key, {
+        ...p,
+        mrn: key,
+        createdAt: p.created_at ?? p.createdAt ?? localMatch?.createdAt,
+      });
     }
   }
 
@@ -92,6 +99,36 @@ export interface RegisterPatientInput {
   age?: string | number;
   sex?: string;
   date_of_birth?: string;
+  rejectDuplicateMrn?: boolean;
+}
+
+function randomInt(min: number, maxExclusive: number): number {
+  const range = maxExclusive - min;
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    const arr = new Uint32Array(1);
+    crypto.getRandomValues(arr);
+    return min + (arr[0] % range);
+  }
+  return min + Math.floor(Math.random() * range);
+}
+
+/**
+ * Generate a random MRN guaranteed not to collide with any known patient MRN.
+ */
+export function generateUniqueMrn(existingPatients: Patient[] = getLocalPatients()): string {
+  const existing = new Set(existingPatients.map(p => (p.mrn || '').trim().toUpperCase()).filter(Boolean));
+  for (let i = 0; i < 100; i++) {
+    const candidate = `MRN-${randomInt(100000, 1000000)}`;
+    if (!existing.has(candidate)) {
+      return candidate;
+    }
+  }
+  while (true) {
+    const candidate = `MRN-${randomInt(10000000, 100000000)}`;
+    if (!existing.has(candidate)) {
+      return candidate;
+    }
+  }
 }
 
 /**
@@ -117,14 +154,19 @@ export function parseFullName(fullName: string): { first_name: string; last_name
  */
 export async function registerPatient(input: RegisterPatientInput): Promise<Patient> {
   const { first_name, last_name } = parseFullName(input.name);
+  const knownPatients = await getPatients().catch(() => getLocalPatients());
 
-  // Generate MRN if not provided
-  let mrn = input.mrn?.trim();
-  if (!mrn) {
-    const randomSuffix = Math.floor(100000 + Math.random() * 900000);
-    mrn = `MRN-${randomSuffix}`;
+  // Use provided MRN (with optional duplicate rejection) or generate a guaranteed-unique MRN
+  let mrn = input.mrn?.trim().toUpperCase();
+  if (mrn) {
+    if (input.rejectDuplicateMrn) {
+      const duplicate = knownPatients.some(p => (p.mrn || '').trim().toUpperCase() === mrn);
+      if (duplicate) {
+        throw new Error(`A patient with MRN "${mrn}" already exists. Please use a unique MRN.`);
+      }
+    }
   } else {
-    mrn = mrn.toUpperCase();
+    mrn = generateUniqueMrn(knownPatients);
   }
 
   // Derive DOB from age if DOB not explicitly specified
@@ -147,21 +189,12 @@ export async function registerPatient(input: RegisterPatientInput): Promise<Pati
     first_name,
     last_name,
     date_of_birth: dob,
+    age: input.age ? String(input.age) : undefined,
     sex,
     createdAt: Date.now(),
   };
 
-  // 1. Immediately cache locally
-  const currentLocal = getLocalPatients();
-  const existingIdx = currentLocal.findIndex(p => p.mrn.toUpperCase() === mrn.toUpperCase());
-  if (existingIdx >= 0) {
-    currentLocal[existingIdx] = { ...currentLocal[existingIdx], ...newPatient };
-  } else {
-    currentLocal.unshift(newPatient);
-  }
-  setLocalPatients(currentLocal);
-
-  // 2. Persist to backend database
+  // 1. Persist to backend database first when rejecting duplicates
   try {
     const token = getAuthToken();
     const headers: Record<string, string> = {
@@ -180,16 +213,42 @@ export async function registerPatient(input: RegisterPatientInput): Promise<Pati
         last_name: newPatient.last_name,
         date_of_birth: newPatient.date_of_birth,
         sex: newPatient.sex,
+        created_at: newPatient.createdAt,
+        allow_update: !input.rejectDuplicateMrn,
       }),
     });
 
     if (!response.ok) {
       const errBody = await response.json().catch(() => null);
+      if (response.status === 409) {
+        throw new Error(errBody?.detail || `A patient with MRN "${newPatient.mrn}" already exists.`);
+      }
       console.warn('Backend patient save returned non-200:', errBody);
+    } else {
+      const resData = await response.json().catch(() => null);
+      if (resData?.mrn) {
+        newPatient.mrn = String(resData.mrn).toUpperCase();
+      }
+      if (resData?.created_at) {
+        newPatient.createdAt = resData.created_at;
+      }
     }
-  } catch (err) {
+  } catch (err: any) {
+    if (err instanceof Error && err.message.includes('already exists')) {
+      throw err;
+    }
     console.warn('Could not persist patient to backend, saved locally:', err);
   }
+
+  // 2. Cache locally
+  const currentLocal = getLocalPatients();
+  const existingIdx = currentLocal.findIndex(p => p.mrn.toUpperCase() === newPatient.mrn.toUpperCase());
+  if (existingIdx >= 0) {
+    currentLocal[existingIdx] = { ...currentLocal[existingIdx], ...newPatient };
+  } else {
+    currentLocal.unshift(newPatient);
+  }
+  setLocalPatients(currentLocal);
 
   return newPatient;
 }

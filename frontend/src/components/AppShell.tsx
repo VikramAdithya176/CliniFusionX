@@ -19,7 +19,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import clsx from 'clsx';
-import { getAuthUser, logoutUser, DEFAULT_CLINICIAN } from '../services/authService';
+import { getAuthUser, logoutUser, DEFAULT_CLINICIAN, type AuthUser } from '../services/authService';
 import { useExplainability } from '../services/explainabilityContext';
 
 interface AppShellProps {
@@ -45,8 +45,20 @@ export default function AppShell({ children }: AppShellProps) {
   const userMenuRef = useRef<HTMLDivElement>(null);
   const sidebarRef = useRef<HTMLDivElement>(null);
 
-  const currentUser = getAuthUser() || DEFAULT_CLINICIAN;
+  const [currentUser, setCurrentUser] = useState<AuthUser>(() => getAuthUser() || DEFAULT_CLINICIAN);
   const { isGenerating, activeGeneratingLabel, cachedCount } = useExplainability();
+
+  useEffect(() => {
+    const syncUser = () => {
+      setCurrentUser(getAuthUser() || DEFAULT_CLINICIAN);
+    };
+    window.addEventListener('authUserChange', syncUser);
+    window.addEventListener('storage', syncUser);
+    return () => {
+      window.removeEventListener('authUserChange', syncUser);
+      window.removeEventListener('storage', syncUser);
+    };
+  }, []);
 
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     const saved = localStorage.getItem('app_theme');
@@ -368,7 +380,7 @@ export default function AppShell({ children }: AppShellProps) {
                   </div>
 
                   <button
-                    onClick={() => { setUserMenuOpen(false); navigate('/settings'); }}
+                    onClick={() => { setUserMenuOpen(false); navigate('/profile'); }}
                     className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer mb-1"
                   >
                     <User size={15} className="text-blue-500" />

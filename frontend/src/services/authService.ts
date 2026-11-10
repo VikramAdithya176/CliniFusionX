@@ -58,9 +58,14 @@ export function getAuthUser(): AuthUser | null {
   return null;
 }
 
+function _notifyAuthChange(): void {
+  window.dispatchEvent(new Event('authUserChange'));
+}
+
 function _persistSession(token: string, user: AuthUser): void {
   localStorage.setItem(AUTH_TOKEN_KEY, token);
   localStorage.setItem(AUTH_USER_KEY, JSON.stringify(user));
+  _notifyAuthChange();
 }
 
 export function logoutUser(): void {
@@ -74,6 +79,7 @@ export function logoutUser(): void {
   }
   localStorage.removeItem(AUTH_TOKEN_KEY);
   localStorage.removeItem(AUTH_USER_KEY);
+  _notifyAuthChange();
 }
 
 // ── Login & Registration methods ──────────────────────────────────────────────
@@ -197,6 +203,7 @@ export async function loginWithGoogle(name: string, email: string, _avatarUrl?: 
   }
   const enriched: AuthUser = { ...user, name: displayName, email: email.trim() };
   localStorage.setItem(AUTH_USER_KEY, JSON.stringify(enriched));
+  _notifyAuthChange();
   return enriched;
 }
 
@@ -326,6 +333,7 @@ export async function updateUserProfile(data: {
   };
 
   localStorage.setItem(AUTH_USER_KEY, JSON.stringify(updated));
+  _notifyAuthChange();
   return updated;
 }
 

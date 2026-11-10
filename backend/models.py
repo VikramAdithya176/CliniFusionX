@@ -20,6 +20,7 @@ class Patient(Base):
     last_name = Column(String)
     date_of_birth = Column(String)
     sex = Column(String)
+    created_at = Column(Integer, nullable=True)
     
     records = relationship("AnalysisRecord", back_populates="patient")
 

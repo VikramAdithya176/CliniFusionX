@@ -83,7 +83,9 @@ export default function NewAnalysis() {
       if (p.sex && p.sex !== 'Unknown') {
         setSex(p.sex);
       }
-      if (p.date_of_birth && p.date_of_birth !== 'N/A') {
+      if (p.age) {
+        setAge(String(p.age));
+      } else if (p.date_of_birth && p.date_of_birth !== 'N/A') {
         const yr = parseInt(p.date_of_birth.split('-')[0], 10);
         if (!isNaN(yr) && yr > 1900) {
           setAge(String(new Date().getFullYear() - yr));
@@ -105,7 +107,9 @@ export default function NewAnalysis() {
     if (match) {
       setPatientMrn(match.mrn);
       if (match.sex && match.sex !== 'Unknown') setSex(match.sex);
-      if (match.date_of_birth && match.date_of_birth !== 'N/A') {
+      if (match.age) {
+        setAge(String(match.age));
+      } else if (match.date_of_birth && match.date_of_birth !== 'N/A') {
         const yr = parseInt(match.date_of_birth.split('-')[0], 10);
         if (!isNaN(yr) && yr > 1900) {
           setAge(String(new Date().getFullYear() - yr));

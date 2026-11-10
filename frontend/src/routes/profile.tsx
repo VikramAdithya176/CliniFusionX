@@ -62,18 +62,37 @@ export default function Profile() {
       .catch(() => setAnalysesCount(0));
   }, []);
 
+  const handleCancelEdit = () => {
+    setName(currentUser?.name || '');
+    setRole(currentUser?.role || '');
+    setDepartment(currentUser?.department || '');
+    setIsEditing(false);
+  };
+
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
+    const trimmedName = name.trim();
+    const trimmedRole = role.trim();
+    const trimmedDepartment = department.trim();
+
+    if (!trimmedName || !trimmedRole || !trimmedDepartment) {
+      setProfileMsg({ type: 'error', text: 'Name, clinical role, and department cannot be empty.' });
+      return;
+    }
+
     setProfileSaving(true);
     setProfileMsg(null);
 
     try {
       const updated = await updateUserProfile({
-        name: name.trim(),
-        role: role.trim(),
-        department: department.trim(),
+        name: trimmedName,
+        role: trimmedRole,
+        department: trimmedDepartment,
       });
       setCurrentUser(updated);
+      setName(updated.name);
+      setRole(updated.role);
+      setDepartment(updated.department);
       setIsEditing(false);
       setProfileMsg({ type: 'success', text: 'Workstation profile updated successfully.' });
       setTimeout(() => setProfileMsg(null), 4000);
@@ -121,8 +140,9 @@ export default function Profile() {
   const displayName = currentUser?.name || 'Dr. Clinician';
   const displayRole = currentUser?.role || 'Thoracic Radiologist';
   const displayDept = currentUser?.department || 'Thoracic Radiology & AI Clinical Intelligence';
-  const displayUsername = currentUser?.id || 'guest';
-  const isGoogleUser = !!currentUser?.email && !currentUser?.id.startsWith('guest') && !currentUser?.id.startsWith('admin');
+  const isGoogleUser =
+    currentUser?.id.startsWith('google_') ||
+    (!!currentUser?.email && !currentUser?.id.startsWith('guest') && !currentUser?.id.startsWith('admin'));
 
   return (
     <div className="max-w-4xl mx-auto pb-12 animate-in fade-in duration-500">
@@ -149,10 +169,14 @@ export default function Profile() {
             {getInitials(displayName)}
           </div>
           <h2 className="text-xl font-display font-bold text-deep-navy dark:text-slate-100">{displayName}</h2>
-          <p className="text-sm font-semibold text-teal-600 dark:text-teal-400 mb-2">{displayRole}</p>
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-100 dark:bg-slate-800 rounded-lg text-xs font-medium text-slate-500 dark:text-slate-400 mb-8 border border-slate-200 dark:border-slate-700">
-            <User size={14} /> @{displayUsername}
-          </div>
+          <p className="text-sm font-semibold text-teal-600 dark:text-teal-400 mb-4">{displayRole}</p>
+          {currentUser?.email ? (
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-100 dark:bg-slate-800 rounded-lg text-xs font-medium text-slate-500 dark:text-slate-400 mb-8 border border-slate-200 dark:border-slate-700 max-w-full truncate">
+              <User size={14} className="shrink-0" /> <span className="truncate">{currentUser.email}</span>
+            </div>
+          ) : (
+            <div className="mb-4" />
+          )}
 
           <div className="w-full flex items-center justify-around border-t border-slate-100 dark:border-slate-800 pt-6 mb-6">
             <div>
@@ -192,7 +216,7 @@ export default function Profile() {
                 </button>
               ) : (
                 <button 
-                  onClick={() => setIsEditing(false)}
+                  onClick={handleCancelEdit}
                   className="px-3 py-1.5 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-lg text-sm font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
                 >
                   <X size={15} /> Cancel
@@ -254,7 +278,7 @@ export default function Profile() {
                 <div className="flex justify-end gap-3 pt-2">
                   <button 
                     type="button" 
-                    onClick={() => setIsEditing(false)}
+                    onClick={handleCancelEdit}
                     className="px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-xl text-sm font-semibold transition-colors cursor-pointer"
                   >
                     Cancel
@@ -288,17 +312,8 @@ export default function Profile() {
                     <input type="text" readOnly value={displayRole} className="w-full pl-9 pr-4 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-medium text-slate-700 dark:text-slate-300 outline-none" />
                   </div>
                 </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Workstation ID / Username</label>
-                  <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
-                      <User size={14} />
-                    </div>
-                    <input type="text" readOnly value={displayUsername} className="w-full pl-9 pr-4 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-medium text-slate-700 dark:text-slate-300 outline-none" />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Department</label>
+                <div className="sm:col-span-2">
+                  <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Department / Hospital Center</label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
                       <Building2 size={14} />
